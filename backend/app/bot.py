@@ -1,9 +1,11 @@
 """Telegram bot — запускается отдельно: uv run python -m app.bot_runner"""
 import asyncio
+import base64
 import logging
 import os
 import re
 from datetime import datetime
+from io import BytesIO
 
 import httpx
 from aiogram import Bot, Dispatcher, F
@@ -15,6 +17,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    PhotoSize,
     WebAppInfo,
 )
 
@@ -84,6 +87,7 @@ async def cmd_start(message: Message):
         "• /new_event — создать мероприятие\n"
         "• /import_recipe <url> — импортировать рецепт по ссылке\n"
         "• /import_text — импортировать рецепт текстом\n"
+        "• 📷 Просто пришли фото рецепта (страница книги, скрин Pinterest и т.п.)\n"
         "• /sync_calendar — синхронизировать с Google Calendar\n\n"
         "Или открой Mini App для полного интерфейса 👇",
         reply_markup=open_app_kb(),
@@ -231,6 +235,41 @@ async def import_text_receive(message: Message, state: FSMContext):
 
 # --- /sync_calendar ---
 
+async def handle_photo(message: Message, bot: Bot):
+    """Auto-parse any incoming photo as a recipe via Qwen Vision."""
+    if not message.photo:
+        return
+    wait = await message.answer("📷 Распознаю рецепт с фото через LLM, подожди 15-20 сек...")
+
+    # Take the largest photo size
+    photo: PhotoSize = max(message.photo, key=lambda p: p.width * p.height)
+    file = await bot.get_file(photo.file_id)
+    buf = BytesIO()
+    await bot.download(file, destination=buf)
+    image_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    caption = (message.caption or "").strip() or None
+    result = await api_post("/recipes/import-image", {"image_base64": image_b64, "title": caption})
+    await wait.delete()
+
+    if result:
+        ing_count = len(result.get("ingredients", []))
+        await message.answer(
+            f"✅ Рецепт распознан с фото!\n\n"
+            f"*{result['title']}*\n"
+            f"🍽 Порций: {result.get('base_servings', '?')}\n"
+            f"🥕 Ингредиентов: {ing_count}\n\n"
+            f"Если что-то распозналось неправильно — поправь вручную в Mini App 👇",
+            parse_mode="Markdown",
+            reply_markup=open_app_kb(),
+        )
+    else:
+        await message.answer(
+            "❌ Не получилось распознать рецепт с фото. "
+            "Попробуй чёткое фото или скриншот с хорошо видимым текстом."
+        )
+
+
 async def cmd_sync_calendar(message: Message):
     # Check if Google Calendar is connected
     status = await api_get("/calendar/status")
@@ -290,6 +329,9 @@ async def main():
 
     # FSM: import_text
     dp.message.register(import_text_receive, ImportText.waiting_for_text)
+
+    # Auto-handle any photo sent to the bot
+    dp.message.register(handle_photo, F.photo)
 
     log.info("Bot started (polling)...")
     await dp.start_polling(bot, skip_updates=True)

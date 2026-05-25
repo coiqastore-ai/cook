@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { api, type Event, type Recipe } from "../api";
+import { api, fileToBase64, type Event, type Recipe } from "../api";
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -9,11 +9,20 @@ const event = ref<Event | null>(null);
 const allRecipes = ref<Recipe[]>([]);
 const showImport = ref(false);
 const showLibrary = ref(false);
-const importMode = ref<"url" | "text">("url");
+const importMode = ref<"url" | "text" | "image">("url");
 const importUrl = ref("");
 const importText = ref("");
 const importTitle = ref("");
+const importImageFile = ref<File | null>(null);
+const importImagePreview = ref<string | null>(null);
 const importing = ref(false);
+
+function onFileSelected(e: globalThis.Event) {
+  const f = (e.target as HTMLInputElement).files?.[0];
+  if (!f) return;
+  importImageFile.value = f;
+  importImagePreview.value = URL.createObjectURL(f);
+}
 
 async function load() {
   event.value = await api.events.get(Number(props.id));
@@ -26,20 +35,25 @@ async function importRecipe() {
     if (importMode.value === "url") {
       if (!importUrl.value.trim()) return;
       recipe = await api.recipes.import(importUrl.value.trim());
-    } else {
+    } else if (importMode.value === "text") {
       if (!importText.value.trim()) return;
       recipe = await api.recipes.importText(importText.value, importTitle.value || undefined);
+    } else {
+      if (!importImageFile.value) return;
+      const b64 = await fileToBase64(importImageFile.value);
+      recipe = await api.recipes.importImage(b64, importTitle.value || undefined);
     }
     await api.events.addRecipe(Number(props.id), recipe.id);
     importUrl.value = "";
     importText.value = "";
     importTitle.value = "";
+    importImageFile.value = null;
+    importImagePreview.value = null;
     showImport.value = false;
     await load();
   } catch {
-    alert(importMode.value === "url"
-      ? "Не удалось импортировать рецепт. Проверьте ссылку."
-      : "Не удалось распознать рецепт из текста. Попробуйте по-другому.");
+    const labels = { url: "ссылке", text: "тексту", image: "фото" };
+    alert(`Не удалось распознать рецепт по ${labels[importMode.value]}.`);
   } finally {
     importing.value = false;
   }
@@ -117,24 +131,40 @@ onMounted(load);
       <!-- Mode tabs -->
       <div class="flex gap-1 bg-gray-100 p-1 rounded-lg">
         <button @click="importMode = 'url'"
-          class="flex-1 py-1.5 text-sm rounded-md transition-colors"
+          class="flex-1 py-1.5 text-xs rounded-md transition-colors"
           :class="importMode === 'url' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
-          🔗 По ссылке
+          🔗 URL
         </button>
         <button @click="importMode = 'text'"
-          class="flex-1 py-1.5 text-sm rounded-md transition-colors"
+          class="flex-1 py-1.5 text-xs rounded-md transition-colors"
           :class="importMode === 'text' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
-          📝 Текстом
+          📝 Текст
+        </button>
+        <button @click="importMode = 'image'"
+          class="flex-1 py-1.5 text-xs rounded-md transition-colors"
+          :class="importMode === 'image' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
+          📷 Фото
         </button>
       </div>
 
       <input v-if="importMode === 'url'" v-model="importUrl" placeholder="https://..." class="input" />
 
-      <template v-else>
+      <template v-else-if="importMode === 'text'">
         <input v-model="importTitle" placeholder="Название (опционально)" class="input" />
         <textarea v-model="importText"
-          placeholder="Вставь рецепт текстом — ингредиенты + способ приготовления в любом формате..."
+          placeholder="Вставь рецепт текстом — ингредиенты + способ приготовления..."
           class="input h-32 resize-none" />
+      </template>
+
+      <template v-else>
+        <input v-model="importTitle" placeholder="Название (опционально)" class="input" />
+        <label class="block">
+          <input type="file" accept="image/*" @change="onFileSelected" class="hidden" />
+          <div class="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center text-gray-500 hover:border-green-400 cursor-pointer">
+            <span v-if="!importImagePreview">📷 Нажми чтобы выбрать фото</span>
+            <img v-else :src="importImagePreview" class="max-h-48 mx-auto rounded" />
+          </div>
+        </label>
       </template>
 
       <div class="flex gap-2">

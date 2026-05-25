@@ -69,6 +69,36 @@ def _int(value) -> int | None:
         return None
 
 
+async def parse_recipe_from_image(image_b64: str, title_hint: str | None = None) -> dict:
+    """Parse recipe from a photo/screenshot via Qwen 2.5 VL."""
+    prompt = """Look at this image and extract the recipe. The image may be a photo of a printed recipe, a handwritten note, or a screenshot from a website/Pinterest/Instagram. Read all text carefully.
+
+Return JSON with exactly these fields:
+{
+  "title": "string",
+  "servings": number (default 4 if unclear),
+  "cook_time_min": number or null,
+  "prep_time_min": number or null,
+  "instructions": ["step1", "step2", ...],
+  "ingredients": [{"name": "string", "quantity": number or null, "unit": "string or null"}]
+}
+
+If the text is in Russian, keep ingredient names in Russian. If you can't read something, omit it rather than guess."""
+
+    data = await llm.vision_json(prompt, image_b64)
+    if not isinstance(data, dict):
+        raise ValueError("Vision LLM returned non-object response")
+    return {
+        "title": data.get("title") or title_hint or "Рецепт с фото",
+        "source_url": None,
+        "base_servings": int(data.get("servings") or 4),
+        "cook_time_min": data.get("cook_time_min"),
+        "prep_time_min": data.get("prep_time_min"),
+        "instructions": data.get("instructions", []),
+        "ingredients_structured": data.get("ingredients", []),
+    }
+
+
 async def parse_recipe_from_text(text: str, title_hint: str | None = None) -> dict:
     """Parse a recipe from raw text (no URL fetching) via LLM."""
     prompt = f"""Extract recipe data from this text. Return JSON with exactly these fields:

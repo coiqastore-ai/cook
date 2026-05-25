@@ -1,20 +1,35 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { api, type Recipe } from "../api";
+import { api, fileToBase64, type Recipe, type Ingredient } from "../api";
 
 const recipes = ref<Recipe[]>([]);
 const loading = ref(false);
 const showImport = ref(false);
-const importMode = ref<"url" | "text">("url");
+const importMode = ref<"url" | "text" | "image">("url");
 const importUrl = ref("");
 const importText = ref("");
 const importTitle = ref("");
+const importImageFile = ref<File | null>(null);
+const importImagePreview = ref<string | null>(null);
 const importing = ref(false);
 const expanded = ref<number | null>(null);
+
+// Ingredient editing
+const addingTo = ref<number | null>(null);
+const newIng = ref({ name: "", quantity: "" as string | number, unit: "" });
+const editingIng = ref<number | null>(null);
+const editIng = ref({ name: "", quantity: "" as string | number, unit: "" });
 
 async function load() {
   loading.value = true;
   try { recipes.value = await api.recipes.list(); } finally { loading.value = false; }
+}
+
+function onFileSelected(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0];
+  if (!f) return;
+  importImageFile.value = f;
+  importImagePreview.value = URL.createObjectURL(f);
 }
 
 async function importRecipe() {
@@ -23,26 +38,92 @@ async function importRecipe() {
     if (importMode.value === "url") {
       if (!importUrl.value.trim()) return;
       await api.recipes.import(importUrl.value.trim());
-    } else {
+    } else if (importMode.value === "text") {
       if (!importText.value.trim()) return;
       await api.recipes.importText(importText.value, importTitle.value || undefined);
+    } else {
+      if (!importImageFile.value) return;
+      const b64 = await fileToBase64(importImageFile.value);
+      await api.recipes.importImage(b64, importTitle.value || undefined);
     }
-    importUrl.value = "";
-    importText.value = "";
-    importTitle.value = "";
+    resetImport();
     showImport.value = false;
     await load();
   } catch {
-    alert(importMode.value === "url"
-      ? "Не удалось импортировать. Проверьте ссылку."
-      : "Не удалось распознать рецепт из текста.");
+    const labels = { url: "ссылку", text: "текст", image: "фото" };
+    alert(`Не удалось распознать рецепт из ${labels[importMode.value]}.`);
   } finally {
     importing.value = false;
   }
 }
 
+function resetImport() {
+  importUrl.value = "";
+  importText.value = "";
+  importTitle.value = "";
+  importImageFile.value = null;
+  importImagePreview.value = null;
+}
+
 function toggle(id: number) {
   expanded.value = expanded.value === id ? null : id;
+  addingTo.value = null;
+  editingIng.value = null;
+}
+
+async function deleteRecipe(id: number) {
+  if (!confirm("Удалить рецепт?")) return;
+  await api.recipes.delete(id);
+  await load();
+}
+
+// --- Ingredient editing ---
+
+function startAdd(recipeId: number) {
+  addingTo.value = recipeId;
+  newIng.value = { name: "", quantity: "", unit: "" };
+}
+
+async function saveNewIngredient(recipeId: number) {
+  if (!newIng.value.name.trim()) return;
+  const qty = newIng.value.quantity === "" ? null : Number(newIng.value.quantity);
+  await api.recipes.addIngredient(recipeId, {
+    name: newIng.value.name.trim(),
+    quantity: qty,
+    unit: newIng.value.unit.trim() || null,
+  });
+  addingTo.value = null;
+  await load();
+  expanded.value = recipeId;
+}
+
+function startEdit(ing: Ingredient) {
+  editingIng.value = ing.id;
+  editIng.value = {
+    name: ing.name,
+    quantity: ing.quantity ?? "",
+    unit: ing.unit ?? "",
+  };
+}
+
+async function saveEditIngredient(recipeId: number, ingredientId: number) {
+  if (!editIng.value.name.trim()) return;
+  const qty = editIng.value.quantity === "" ? null : Number(editIng.value.quantity);
+  await api.recipes.updateIngredient(recipeId, ingredientId, {
+    name: editIng.value.name.trim(),
+    quantity: qty,
+    unit: editIng.value.unit.trim() || null,
+  });
+  editingIng.value = null;
+  await load();
+  expanded.value = recipeId;
+}
+
+async function removeIngredient(recipeId: number, ingredientId: number) {
+  if (!confirm("Удалить ингредиент?")) return;
+  await api.recipes.deleteIngredient(recipeId, ingredientId);
+  await load();
+  expanded.value = recipeId;
 }
 
 onMounted(load);
@@ -54,7 +135,7 @@ onMounted(load);
       <h1 class="text-xl font-semibold text-gray-800">Рецепты</h1>
       <button @click="showImport = !showImport"
         class="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium">
-        + Импорт
+        + Добавить
       </button>
     </div>
 
@@ -62,31 +143,47 @@ onMounted(load);
     <div v-if="showImport" class="bg-white rounded-xl border border-gray-200 p-4 mb-4 space-y-2">
       <div class="flex gap-1 bg-gray-100 p-1 rounded-lg">
         <button @click="importMode = 'url'"
-          class="flex-1 py-1.5 text-sm rounded-md"
+          class="flex-1 py-1.5 text-xs rounded-md"
           :class="importMode === 'url' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
-          🔗 По ссылке
+          🔗 URL
         </button>
         <button @click="importMode = 'text'"
-          class="flex-1 py-1.5 text-sm rounded-md"
+          class="flex-1 py-1.5 text-xs rounded-md"
           :class="importMode === 'text' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
-          📝 Текстом
+          📝 Текст
+        </button>
+        <button @click="importMode = 'image'"
+          class="flex-1 py-1.5 text-xs rounded-md"
+          :class="importMode === 'image' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
+          📷 Фото
         </button>
       </div>
 
       <input v-if="importMode === 'url'" v-model="importUrl" placeholder="https://povarenok.ru/..." class="input" />
 
-      <template v-else>
+      <template v-else-if="importMode === 'text'">
         <input v-model="importTitle" placeholder="Название (опционально)" class="input" />
         <textarea v-model="importText"
-          placeholder="Вставь рецепт текстом — ингредиенты + способ приготовления..."
+          placeholder="Ингредиенты + способ приготовления..."
           class="input h-40 resize-none" />
+      </template>
+
+      <template v-else>
+        <input v-model="importTitle" placeholder="Название (опционально)" class="input" />
+        <label class="block">
+          <input type="file" accept="image/*" @change="onFileSelected" class="hidden" />
+          <div class="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center text-gray-500 hover:border-green-400 cursor-pointer">
+            <span v-if="!importImagePreview">📷 Нажми чтобы выбрать фото</span>
+            <img v-else :src="importImagePreview" class="max-h-48 mx-auto rounded" />
+          </div>
+        </label>
       </template>
 
       <div class="flex gap-2">
         <button @click="importRecipe" :disabled="importing" class="btn-primary flex-1">
-          {{ importing ? "Импортирую..." : "Импортировать" }}
+          {{ importing ? "Распознаю..." : "Импортировать" }}
         </button>
-        <button @click="showImport = false" class="btn-ghost flex-1">Отмена</button>
+        <button @click="showImport = false; resetImport()" class="btn-ghost flex-1">Отмена</button>
       </div>
     </div>
 
@@ -103,7 +200,7 @@ onMounted(load);
         <div @click="toggle(r.id)" class="p-4 cursor-pointer flex justify-between items-start">
           <div class="flex-1 pr-2">
             <h3 class="font-medium text-gray-800">{{ r.title }}</h3>
-            <div class="text-xs text-gray-500 mt-1 flex gap-3">
+            <div class="text-xs text-gray-500 mt-1 flex gap-3 flex-wrap">
               <span>🍽 {{ r.base_servings }} порц.</span>
               <span>🥕 {{ r.ingredients.length }} ингр.</span>
               <span v-if="r.cook_time_min">⏱ {{ r.cook_time_min }} мин</span>
@@ -112,20 +209,61 @@ onMounted(load);
           <span class="text-gray-400 text-sm">{{ expanded === r.id ? "▲" : "▼" }}</span>
         </div>
 
-        <!-- Expanded details -->
-        <div v-if="expanded === r.id" class="border-t border-gray-100 px-4 pb-4 pt-3">
-          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Ингредиенты</p>
-          <ul class="space-y-1">
-            <li v-for="ing in r.ingredients" :key="ing.id" class="text-sm text-gray-700 flex justify-between">
-              <span>{{ ing.name }}</span>
-              <span class="text-gray-400">
-                {{ ing.quantity ?? "" }} {{ ing.unit ?? "" }}
-                <span v-if="ing.normalized_grams" class="text-gray-300">({{ Math.round(ing.normalized_grams) }} г)</span>
-              </span>
+        <div v-if="expanded === r.id" class="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
+          <!-- Ingredients header with + button -->
+          <div class="flex items-center justify-between">
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ингредиенты</p>
+            <button v-if="addingTo !== r.id" @click="startAdd(r.id)"
+              class="text-xs text-green-600 font-medium">+ Добавить</button>
+          </div>
+
+          <!-- Add new ingredient form -->
+          <div v-if="addingTo === r.id" class="bg-gray-50 rounded-lg p-2 space-y-2">
+            <input v-model="newIng.name" placeholder="Название (мука, лук...)" class="input text-sm" />
+            <div class="flex gap-2">
+              <input v-model="newIng.quantity" type="number" step="0.1" placeholder="Кол-во" class="input text-sm flex-1" />
+              <input v-model="newIng.unit" placeholder="г / шт / ст.л." class="input text-sm flex-1" />
+            </div>
+            <div class="flex gap-2">
+              <button @click="saveNewIngredient(r.id)" class="btn-primary flex-1 text-sm py-1.5">Сохранить</button>
+              <button @click="addingTo = null" class="btn-ghost flex-1 text-sm py-1.5">Отмена</button>
+            </div>
+          </div>
+
+          <!-- Ingredient list -->
+          <ul v-if="r.ingredients.length" class="space-y-1.5">
+            <li v-for="ing in r.ingredients" :key="ing.id" class="text-sm">
+              <!-- Edit mode -->
+              <div v-if="editingIng === ing.id" class="bg-amber-50 rounded-lg p-2 space-y-2">
+                <input v-model="editIng.name" class="input text-sm" />
+                <div class="flex gap-2">
+                  <input v-model="editIng.quantity" type="number" step="0.1" placeholder="Кол-во" class="input text-sm flex-1" />
+                  <input v-model="editIng.unit" placeholder="ед." class="input text-sm flex-1" />
+                </div>
+                <div class="flex gap-2">
+                  <button @click="saveEditIngredient(r.id, ing.id)" class="btn-primary flex-1 text-sm py-1.5">Сохранить</button>
+                  <button @click="editingIng = null" class="btn-ghost flex-1 text-sm py-1.5">Отмена</button>
+                </div>
+              </div>
+              <!-- View mode -->
+              <div v-else class="flex justify-between items-center gap-2 group">
+                <span class="text-gray-700 flex-1">{{ ing.name }}</span>
+                <span class="text-gray-400 text-xs">
+                  {{ ing.quantity ?? "" }} {{ ing.unit ?? "" }}
+                  <span v-if="ing.normalized_grams" class="text-gray-300">({{ Math.round(ing.normalized_grams) }} г)</span>
+                </span>
+                <button @click="startEdit(ing)" class="text-gray-400 hover:text-blue-500 text-xs">✏️</button>
+                <button @click="removeIngredient(r.id, ing.id)" class="text-gray-400 hover:text-red-500 text-xs">✕</button>
+              </div>
             </li>
           </ul>
-          <a v-if="r.source_url" :href="r.source_url" target="_blank"
-            class="mt-3 inline-block text-xs text-green-600 underline">Открыть оригинал →</a>
+          <p v-else class="text-xs text-gray-400 italic">Ингредиенты не указаны</p>
+
+          <div class="flex gap-3 pt-2 border-t border-gray-100">
+            <a v-if="r.source_url" :href="r.source_url" target="_blank"
+              class="text-xs text-green-600 underline">Открыть оригинал →</a>
+            <button @click="deleteRecipe(r.id)" class="text-xs text-red-500 ml-auto">Удалить рецепт</button>
+          </div>
         </div>
       </div>
     </div>

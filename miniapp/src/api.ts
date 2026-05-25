@@ -1,5 +1,19 @@
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
+export async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // strip "data:image/...;base64," prefix
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -61,6 +75,18 @@ export const api = {
     import: (url: string) => req<Recipe>("POST", "/recipes/import", { url }),
     importText: (text: string, title?: string) =>
       req<Recipe>("POST", "/recipes/import-text", { text, title }),
+    importImage: (imageBase64: string, title?: string) =>
+      req<Recipe>("POST", "/recipes/import-image", { image_base64: imageBase64, title }),
+    create: (data: { title: string; source_url?: string; base_servings?: number }) =>
+      req<Recipe>("POST", "/recipes/", data),
+    update: (id: number, data: Partial<Recipe>) => req<Recipe>("PATCH", `/recipes/${id}`, data),
+    delete: (id: number) => req<void>("DELETE", `/recipes/${id}`),
+    addIngredient: (recipeId: number, data: { name: string; quantity?: number | null; unit?: string | null }) =>
+      req<Ingredient>("POST", `/recipes/${recipeId}/ingredients`, data),
+    updateIngredient: (recipeId: number, ingredientId: number, data: { name?: string; quantity?: number | null; unit?: string | null }) =>
+      req<Ingredient>("PATCH", `/recipes/${recipeId}/ingredients/${ingredientId}`, data),
+    deleteIngredient: (recipeId: number, ingredientId: number) =>
+      req<void>("DELETE", `/recipes/${recipeId}/ingredients/${ingredientId}`),
   },
 
   shopping: {
