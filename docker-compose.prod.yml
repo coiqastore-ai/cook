@@ -28,6 +28,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://mealie:${POSTGRES_PASSWORD:-mealie}@postgres:5432/mealie
+      MEALIE_PERSIST_DIR: /app/persist
     volumes:
       - backend_data:/app/persist
     networks:

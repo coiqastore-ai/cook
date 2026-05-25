@@ -38,16 +38,22 @@ async function checkCalendar() {
 async function syncCalendar() {
   calendarLoading.value = true;
   try {
-    if (!calendarStatus.value) {
-      const { url } = await api.calendar.authStart();
-      window.open(url, "_blank");
+    // Re-check status first (might have changed)
+    const status = await api.calendar.status();
+    calendarStatus.value = status.connected;
+
+    if (!status.connected) {
+      // Open OAuth flow in a new tab — backend will 302 to Google
+      const base = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
+      window.open(`${base}/calendar/oauth/start`, "_blank");
+      alert("Открыта вкладка с Google для авторизации. После завершения нажми «Синхронизировать» снова.");
       return;
     }
     const result = await api.calendar.sync();
     alert(`✅ Синхронизировано!\nСоздано: ${result.created}, обновлено: ${result.updated}`);
     await load();
   } catch (e) {
-    alert("Ошибка синхронизации");
+    alert("Ошибка синхронизации: " + (e instanceof Error ? e.message : String(e)));
   } finally {
     calendarLoading.value = false;
   }

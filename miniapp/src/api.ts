@@ -78,6 +78,6 @@ export const api = {
   calendar: {
     status: () => req<{ connected: boolean }>("GET", "/calendar/status"),
     sync: () => req<{ created: number; updated: number }>("POST", "/calendar/sync", {}),
-    authStart: () => req<{ url: string }>("GET", "/calendar/oauth/start"),
+    // OAuth flow start — open via window.open() directly (302 redirect to Google)
   },
 };

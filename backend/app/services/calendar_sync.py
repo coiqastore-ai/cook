@@ -13,7 +13,12 @@ import httpx
 
 from app.config import settings
 
-_TOKEN_PATH = Path(__file__).parent.parent.parent / "token.json"
+# Token persisted to volume-mounted directory so it survives container restarts.
+# In Docker: MEALIE_PERSIST_DIR=/app/persist (set via docker-compose).
+# Locally: defaults to backend/data_persist/
+_PERSIST_DIR = Path(os.environ.get("MEALIE_PERSIST_DIR") or (Path(__file__).parent.parent.parent / "data_persist"))
+_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
+_TOKEN_PATH = _PERSIST_DIR / "token.json"
 _STATE_PATH = Path(__file__).parent.parent.parent / ".oauth_state.json"
 _SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 _CALENDAR_IDS = [
