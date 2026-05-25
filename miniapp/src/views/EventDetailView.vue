@@ -69,17 +69,22 @@ async function addFromLibrary(recipeId: number) {
   await load();
 }
 
-async function updateMultiplier(recipeId: number, value: string) {
-  const m = parseFloat(value);
-  if (isNaN(m) || m <= 0) return;
-  await api.events.updateMultiplier(Number(props.id), recipeId, m);
+async function updateServings(recipeId: number, value: string, baseServings: number) {
+  const target = parseFloat(value);
+  if (isNaN(target) || target <= 0 || !baseServings) return;
+  const multiplier = target / baseServings;
+  await api.events.updateMultiplier(Number(props.id), recipeId, multiplier);
   await load();
 }
 
 async function removeRecipe(recipeId: number) {
-  if (!confirm("Убрать рецепт из события?")) return;
-  await api.events.removeRecipe(Number(props.id), recipeId);
-  await load();
+  if (!confirm("Убрать рецепт из события? (рецепт останется в библиотеке)")) return;
+  try {
+    await api.events.removeRecipe(Number(props.id), recipeId);
+    await load();
+  } catch (e) {
+    alert("Не удалось убрать: " + (e instanceof Error ? e.message : e));
+  }
 }
 
 async function openLibrary() {
@@ -223,12 +228,15 @@ onMounted(load);
           {{ er.recipe.ingredients.length }} ингр. ·
           {{ er.recipe.cook_time_min ?? "?" }} мин готовки
         </div>
-        <div class="flex items-center gap-2">
-          <span class="text-sm text-gray-600">Множитель:</span>
-          <input type="number" :value="er.servings_multiplier" min="0.1" step="0.5"
-            @change="updateMultiplier(er.recipe_id, ($event.target as HTMLInputElement).value)"
-            class="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center" />
-          <span class="text-xs text-gray-400">× {{ er.recipe.base_servings }} порц.</span>
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-sm text-gray-700">Готовлю на</span>
+          <input type="number"
+            :value="Math.round(er.servings_multiplier * er.recipe.base_servings)"
+            min="1" step="1"
+            @change="updateServings(er.recipe_id, ($event.target as HTMLInputElement).value, er.recipe.base_servings)"
+            class="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center" />
+          <span class="text-sm text-gray-700">порц.</span>
+          <span class="text-xs text-gray-400">(рецепт на {{ er.recipe.base_servings }})</span>
         </div>
       </div>
     </div>

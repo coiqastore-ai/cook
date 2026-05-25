@@ -72,9 +72,14 @@ function toggle(id: number) {
 }
 
 async function deleteRecipe(id: number) {
-  if (!confirm("Удалить рецепт?")) return;
-  await api.recipes.delete(id);
-  await load();
+  if (!confirm("Удалить рецепт навсегда? Он также будет убран из всех событий.")) return;
+  try {
+    await api.recipes.delete(id);
+    expanded.value = null;
+    await load();
+  } catch (e) {
+    alert("Не удалось удалить: " + (e instanceof Error ? e.message : e));
+  }
 }
 
 // --- Ingredient editing ---

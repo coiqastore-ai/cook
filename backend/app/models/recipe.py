@@ -20,4 +20,6 @@ class Recipe(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ingredients: Mapped[list["Ingredient"]] = relationship(back_populates="recipe", cascade="all, delete-orphan")
-    event_recipes: Mapped[list["EventRecipe"]] = relationship(back_populates="recipe")
+    event_recipes: Mapped[list["EventRecipe"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan", passive_deletes=True,
+    )

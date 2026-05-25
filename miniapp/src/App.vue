@@ -10,7 +10,7 @@
         <span class="text-xs">Рецепты</span>
       </RouterLink>
     </nav>
-    <div class="pb-20">
+    <div class="pb-24">
       <RouterView />
     </div>
   </div>
