@@ -59,26 +59,33 @@ async def smart_json(prompt: str) -> dict | list:
     return _parse_json(await smart(prompt))
 
 
-async def vision(prompt: str, image_b64: str) -> str:
-    """Qwen 2.5 VL — recognize text from images (photo, screenshot).
-    image_b64 can be either a raw base64 string or full data URL.
-    """
-    if not image_b64.startswith("data:"):
-        image_b64 = f"data:image/jpeg;base64,{image_b64}"
+def _as_data_url(image_b64: str) -> str:
+    return image_b64 if image_b64.startswith("data:") else f"data:image/jpeg;base64,{image_b64}"
+
+
+async def vision_multi(prompt: str, images_b64: list[str]) -> str:
+    """Qwen 2.5 VL — recognize text from one OR MULTIPLE images at once.
+    Pass several images when they're parts of the same recipe (album in Telegram)."""
+    if not images_b64:
+        raise ValueError("vision_multi needs at least one image")
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    for img in images_b64:
+        content.append({"type": "image_url", "image_url": {"url": _as_data_url(img)}})
     response = await get_client().chat.completions.create(
         model=settings.openrouter_model_vision,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image_b64}},
-                ],
-            }
-        ],
+        messages=[{"role": "user", "content": content}],
         temperature=0,
     )
     return response.choices[0].message.content or ""
+
+
+async def vision_multi_json(prompt: str, images_b64: list[str]) -> dict | list:
+    return _parse_json(await vision_multi(prompt, images_b64))
+
+
+# Single-image helpers — kept as thin wrappers for callers that still use them
+async def vision(prompt: str, image_b64: str) -> str:
+    return await vision_multi(prompt, [image_b64])
 
 
 async def vision_json(prompt: str, image_b64: str) -> dict | list:

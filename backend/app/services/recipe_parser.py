@@ -111,24 +111,40 @@ def _int(value) -> int | None:
         return None
 
 
-async def parse_recipe_from_image(image_b64: str, title_hint: str | None = None) -> dict:
-    """Parse recipe from a photo/screenshot via Qwen 2.5 VL."""
-    prompt = """Look at this image and extract the recipe. The image may be a photo of a printed recipe, a handwritten note, or a screenshot from a website/Pinterest/Instagram. Read all text carefully.
+async def parse_recipe_from_images(images_b64: list[str], title_hint: str | None = None) -> dict:
+    """Parse a SINGLE recipe from one or several photos (Telegram media group).
+    The LLM treats all images as parts of the same recipe — different pages of a book,
+    multiple Pinterest screenshots, etc. It should combine info, not duplicate."""
+    if not images_b64:
+        raise ValueError("Need at least one image")
+
+    intro = (
+        "These images all belong to ONE single recipe — likely different pages or screenshots "
+        "of the same dish (e.g. an Instagram/Pinterest album). Read text from every image and "
+        "COMBINE the information into ONE recipe (do NOT make a list of separate recipes; do NOT duplicate ingredients)."
+        if len(images_b64) > 1
+        else "Look at this image and extract the recipe. The image may be a photo of a printed recipe, a handwritten note, or a screenshot from a website/Pinterest/Instagram. Read all text carefully."
+    )
+
+    prompt = f"""{intro}
 
 Return JSON with exactly these fields:
-{
+{{
   "title": "string",
   "servings": number (default 4 if unclear),
   "cook_time_min": number or null,
   "prep_time_min": number or null,
   "instructions": ["step1", "step2", ...],
-  "ingredients": [{"name": "string", "quantity": number or null, "unit": "string or null"}]
-}
+  "ingredients": [{{"name": "string", "quantity": number or null, "unit": "string or null"}}]
+}}
 
-IMPORTANT: Always return all text in RUSSIAN. If the recipe is in another language (English, Italian, French, etc.), translate the title, ingredient names, units, and instructions to Russian. Keep numbers/quantities unchanged.
-If you can't read something, omit it rather than guess."""
+IMPORTANT:
+- Read EVERY ingredient from EVERY image. Do not skip — even small items like salt, pepper, garlic, oil, water, ice, herbs.
+- Always return all text in RUSSIAN. Translate from any language to Russian. Keep numbers/quantities unchanged.
+- For "to taste" amounts (по вкусу) — quantity: null, unit: "по вкусу".
+- If you can't read something, omit it rather than guess."""
 
-    data = await llm.vision_json(prompt, image_b64)
+    data = await llm.vision_multi_json(prompt, images_b64)
     if not isinstance(data, dict):
         raise ValueError("Vision LLM returned non-object response")
     return {
@@ -142,8 +158,35 @@ If you can't read something, omit it rather than guess."""
     }
 
 
+# Backward-compat: single-image alias
+async def parse_recipe_from_image(image_b64: str, title_hint: str | None = None) -> dict:
+    return await parse_recipe_from_images([image_b64], title_hint=title_hint)
+
+
+def _clean_pinterest_noise(text: str) -> str:
+    """Strip obvious Pinterest/Instagram preview blocks from copied text."""
+    lines = text.splitlines()
+    cleaned = []
+    skip_block = False
+    for line in lines:
+        stripped = line.strip()
+        # Detect Pinterest/Instagram preview headers
+        if stripped in ("Pinterest", "Instagram", "Reels", "TikTok"):
+            skip_block = True
+            continue
+        if skip_block:
+            # Skip lines that look like preview metadata until blank line ends the block
+            if not stripped or stripped.startswith(("Взгляните", "Check out", "Meet your", "Posted by")):
+                continue
+            # exit block once we see a normal line
+            skip_block = False
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
 async def parse_recipe_from_text(text: str, title_hint: str | None = None) -> dict:
     """Parse a recipe from raw text (no URL fetching) via LLM."""
+    clean_text = _clean_pinterest_noise(text)
     prompt = f"""Extract recipe data from this text. Return JSON with exactly these fields:
 {{
   "title": "string (use the user-provided title if given)",
@@ -154,12 +197,16 @@ async def parse_recipe_from_text(text: str, title_hint: str | None = None) -> di
   "ingredients": [{{"name": "string", "quantity": number or null, "unit": "string or null"}}]
 }}
 
-IMPORTANT: Always return all text in RUSSIAN. Translate the title, ingredient names, units, and instructions to Russian if the source is in another language. Keep numeric values and quantities unchanged.
+IMPORTANT:
+- Always return all text in RUSSIAN. Translate from any language to Russian. Keep numbers/quantities unchanged.
+- Read EVERY ingredient — including salt, pepper, oil, water, etc. Don't skip "small" items.
+- Section headers in the text (e.g. "Мясо", "Овощи", "Приправы") are categories — extract the ingredients that follow, ignore the headers themselves.
+- For "to taste" → quantity: null, unit: "по вкусу".
 
 Title hint (if provided): {title_hint or "—"}
 
 Recipe text:
-{text}"""
+{clean_text}"""
 
     data = await llm.smart_json(prompt)
     return {

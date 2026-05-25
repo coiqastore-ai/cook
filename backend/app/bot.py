@@ -82,14 +82,17 @@ class ImportUrl(StatesGroup):
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
-async def api_post(path: str, data: dict) -> dict | None:
-    async with httpx.AsyncClient(timeout=60) as client:
+async def api_post(path: str, data: dict, timeout: float = 180) -> dict | None:
+    """Returns parsed JSON on success, None on failure. Logs the response body for diagnostics."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             r = await client.post(f"{API_BASE}{path}", json=data)
-            r.raise_for_status()
+            if r.status_code >= 400:
+                log.error("API POST %s → %d: %s", path, r.status_code, r.text[:500])
+                return None
             return r.json()
         except Exception as e:
-            log.error("API POST %s failed: %s", path, e)
+            log.error("API POST %s exception: %s", path, e)
             return None
 
 
@@ -316,20 +319,86 @@ async def import_text_receive(message: Message, state: FSMContext):
 
 # --- Photo recognition (auto) ---
 
-async def handle_photo(message: Message, bot: Bot):
-    if not message.photo:
-        return
-    wait = await message.answer("📷 Распознаю рецепт с фото через LLM, подожди 15-20 сек...")
-
+async def _download_photo_b64(message: Message, bot: Bot) -> str:
     photo: PhotoSize = max(message.photo, key=lambda p: p.width * p.height)
     file = await bot.get_file(photo.file_id)
     buf = BytesIO()
     await bot.download(file, destination=buf)
-    image_b64 = base64.b64encode(buf.getvalue()).decode()
+    return base64.b64encode(buf.getvalue()).decode()
 
+
+# Buffer for Telegram album messages — same media_group_id arrives as N separate messages
+_media_groups: dict[str, dict] = {}
+
+
+async def _flush_media_group(bot: Bot, gid: str):
+    """Wait ~2.5s for the rest of the album to arrive, then send ALL images to LLM as ONE recipe."""
+    await asyncio.sleep(2.5)
+    entry = _media_groups.pop(gid, None)
+    if not entry:
+        return
+    images = entry["images"]
+    caption = entry["caption"]
+    message = entry["message"]
+
+    wait = await message.answer(
+        f"📷 Распознаю рецепт с {len(images)} фото через LLM, подожди 20-30 сек..."
+    )
+    result = await api_post(
+        "/recipes/import-image",
+        {"images_base64": images, "title": caption},
+    )
+    try:
+        await wait.delete()
+    except Exception:
+        pass
+
+    if result:
+        ing_count = len(result.get("ingredients", []))
+        await message.answer(
+            f"✅ Рецепт распознан с {len(images)} фото!\n\n"
+            f"*{result['title']}*\n"
+            f"🍽 Порций: {result.get('base_servings', '?')}\n"
+            f"🥕 Ингредиентов: {ing_count}\n\n"
+            f"Если что-то распозналось неправильно — поправь вручную в Mini App.",
+            parse_mode="Markdown",
+            reply_markup=main_kb(),
+        )
+    else:
+        await message.answer(
+            "❌ Не получилось распознать рецепт с этих фото. "
+            "Попробуй прислать более чёткие фото.",
+            reply_markup=main_kb(),
+        )
+
+
+async def handle_photo(message: Message, bot: Bot):
+    """Auto-parse incoming photo(s) as ONE recipe.
+    Telegram album → all images combined into a single multi-image LLM call."""
+    if not message.photo:
+        return
+
+    image_b64 = await _download_photo_b64(message, bot)
     caption = (message.caption or "").strip() or None
+
+    gid = message.media_group_id
+    if gid:
+        if gid in _media_groups:
+            _media_groups[gid]["images"].append(image_b64)
+            if caption and not _media_groups[gid]["caption"]:
+                _media_groups[gid]["caption"] = caption
+        else:
+            _media_groups[gid] = {"images": [image_b64], "caption": caption, "message": message}
+            asyncio.create_task(_flush_media_group(bot, gid))
+        return
+
+    # Single photo path
+    wait = await message.answer("📷 Распознаю рецепт с фото через LLM, подожди 15-20 сек...")
     result = await api_post("/recipes/import-image", {"image_base64": image_b64, "title": caption})
-    await wait.delete()
+    try:
+        await wait.delete()
+    except Exception:
+        pass
 
     if result:
         ing_count = len(result.get("ingredients", []))

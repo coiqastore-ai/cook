@@ -18,7 +18,10 @@ class ImportTextRequest(BaseModel):
 
 
 class ImportImageRequest(BaseModel):
-    image_base64: str  # raw base64 or "data:image/...;base64,..." data URL
+    # Accept either a single image (image_base64) or multiple (images_base64).
+    # For multi-photo Telegram albums, send all photos in one request.
+    image_base64: str | None = None
+    images_base64: list[str] | None = None
     title: str | None = None
 
 
@@ -133,10 +136,12 @@ async def import_recipe_from_text(body: ImportTextRequest, session: AsyncSession
 
 @router.post("/import-image", response_model=RecipeOut, status_code=201)
 async def import_recipe_from_image(body: ImportImageRequest, session: AsyncSession = Depends(get_session)):
-    if not body.image_base64.strip():
-        raise HTTPException(422, "Empty image")
+    images = body.images_base64 or ([body.image_base64] if body.image_base64 else [])
+    images = [img for img in images if img and img.strip()]
+    if not images:
+        raise HTTPException(422, "No image data provided")
     try:
-        data = await recipe_parser.parse_recipe_from_image(body.image_base64, title_hint=body.title)
+        data = await recipe_parser.parse_recipe_from_images(images, title_hint=body.title)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe from image: {e}")
     return await _save_parsed_recipe(data, session)
