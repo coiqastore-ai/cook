@@ -3,7 +3,6 @@ import asyncio
 import base64
 import logging
 import os
-import re
 from datetime import datetime
 from io import BytesIO
 
@@ -16,8 +15,10 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
     PhotoSize,
+    ReplyKeyboardMarkup,
     WebAppInfo,
 )
 
@@ -26,8 +27,37 @@ from app.config import settings
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-# В docker-compose API_BASE=http://backend:8000, локально — fallback на localhost
 API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
+
+
+# ---------------------------------------------------------------------------
+# Button labels (single source of truth)
+# ---------------------------------------------------------------------------
+
+BTN_OPEN_APP = "📲 Открыть приложение"
+BTN_NEW_EVENT = "➕ Новое событие"
+BTN_IMPORT_URL = "🔗 Рецепт по ссылке"
+BTN_IMPORT_TEXT = "📝 Рецепт текстом"
+BTN_IMPORT_PHOTO_INFO = "📷 Рецепт с фото"
+BTN_HELP = "❓ Помощь"
+
+
+def main_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=BTN_OPEN_APP, web_app=WebAppInfo(url=settings.miniapp_url))],
+            [KeyboardButton(text=BTN_NEW_EVENT)],
+            [KeyboardButton(text=BTN_IMPORT_URL), KeyboardButton(text=BTN_IMPORT_TEXT)],
+            [KeyboardButton(text=BTN_IMPORT_PHOTO_INFO), KeyboardButton(text=BTN_HELP)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def open_app_inline() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📲 Открыть приложение", web_app=WebAppInfo(url=settings.miniapp_url))
+    ]])
 
 
 # ---------------------------------------------------------------------------
@@ -44,12 +74,16 @@ class ImportText(StatesGroup):
     waiting_for_text = State()
 
 
+class ImportUrl(StatesGroup):
+    waiting_for_url = State()
+
+
 # ---------------------------------------------------------------------------
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
 async def api_post(path: str, data: dict) -> dict | None:
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         try:
             r = await client.post(f"{API_BASE}{path}", json=data)
             r.raise_for_status()
@@ -59,44 +93,44 @@ async def api_post(path: str, data: dict) -> dict | None:
             return None
 
 
-async def api_get(path: str) -> dict | list | None:
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            r = await client.get(f"{API_BASE}{path}")
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            log.error("API GET %s failed: %s", path, e)
-            return None
-
-
 # ---------------------------------------------------------------------------
-# Handlers
+# Universal handlers
 # ---------------------------------------------------------------------------
 
-def open_app_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=settings.miniapp_url))
-    ]])
-
-
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer(
         "👋 Привет! Я Mealie Bot — помогаю планировать застолья.\n\n"
-        "Что умею:\n"
-        "• /new_event — создать мероприятие\n"
-        "• /import_recipe <url> — импортировать рецепт по ссылке\n"
-        "• /import_text — импортировать рецепт текстом\n"
-        "• 📷 Просто пришли фото рецепта (страница книги, скрин Pinterest и т.п.)\n"
-        "• /sync_calendar — синхронизировать с Google Calendar\n\n"
-        "Или открой Mini App для полного интерфейса 👇",
-        reply_markup=open_app_kb(),
+        "Что я умею:\n"
+        "• Создавать события и хранить ваши рецепты\n"
+        "• Импортировать рецепты по ссылке, тексту или с фото\n"
+        "• Собирать единый список закупки по событию\n"
+        "• Делать таймлайн готовки\n"
+        "• Напоминать о событии за сутки\n\n"
+        "Выбери действие на клавиатуре снизу 👇",
+        reply_markup=main_kb(),
     )
 
 
-# --- /new_event FSM ---
+async def show_help(message: Message):
+    await message.answer(
+        "📖 *Как пользоваться:*\n\n"
+        "🟢 *Создать событие:* нажми «Новое событие» → введи название, дату и кол-во гостей\n\n"
+        "🟢 *Добавить рецепт:* три способа\n"
+        "  • «Рецепт по ссылке» — вставь URL\n"
+        "  • «Рецепт текстом» — вставь текст в любом формате\n"
+        "  • Просто *пришли фото* рецепта (страница книги, скрин Pinterest и т.п.)\n\n"
+        "🟢 *Закупка и таймлайн:* открой Mini App, выбери событие — там список ингредиентов и план готовки\n\n"
+        "🟢 *Календарь:* в Mini App у каждого события есть кнопка «Добавить в календарь» — скачает .ics, добавится в любой календарь (Google, Apple, Outlook)\n\n"
+        "🟢 *Напоминания:* за сутки до события я пришлю тебе сообщение",
+        parse_mode="Markdown",
+        reply_markup=main_kb(),
+    )
 
-async def cmd_new_event(message: Message, state: FSMContext):
+
+# --- New event FSM ---
+
+async def start_new_event(message: Message, state: FSMContext):
     await state.set_state(NewEvent.title)
     await message.answer("📅 Как назовём мероприятие?")
 
@@ -135,48 +169,66 @@ async def new_event_date(message: Message, state: FSMContext):
 
 
 async def new_event_guests(message: Message, state: FSMContext):
-    text = message.text.strip()
     try:
-        guests = int(text)
+        guests = int(message.text.strip())
         if guests < 1:
             raise ValueError
-    except ValueError:
+    except (ValueError, AttributeError):
         await message.answer("⚠️ Введи целое число больше 0.")
         return
 
     data = await state.get_data()
     await state.clear()
 
-    payload = {"title": data["title"], "guests_count": guests, "date": data.get("date")}
+    payload = {
+        "title": data["title"],
+        "guests_count": guests,
+        "date": data.get("date"),
+        "telegram_user_id": message.from_user.id if message.from_user else None,
+    }
     result = await api_post("/events/", payload)
 
     if result:
-        date_str = f"\n📆 {data['date'][:10]}" if data.get("date") else ""
+        date_str = f"\n📆 {data['date'][:16].replace('T', ' ')}" if data.get("date") else ""
+        reminder_note = "\n\n⏰ За сутки до события я тебе напомню." if data.get("date") else ""
         await message.answer(
             f"✅ Мероприятие создано!\n\n"
             f"*{result['title']}*{date_str}\n"
-            f"👥 Гостей: {guests}\n\n"
-            f"Добавь рецепты через Mini App 👇",
+            f"👥 Гостей: {guests}{reminder_note}\n\n"
+            f"Добавь рецепты — нажми кнопку ниже или открой Mini App.",
             parse_mode="Markdown",
-            reply_markup=open_app_kb(),
+            reply_markup=main_kb(),
         )
     else:
-        await message.answer("❌ Не удалось создать мероприятие. Убедись, что бэкенд запущен.")
+        await message.answer("❌ Не удалось создать мероприятие.", reply_markup=main_kb())
 
 
-# --- /import_recipe ---
+# --- Import URL ---
 
-async def cmd_import_recipe(message: Message):
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2 or not args[1].startswith("http"):
-        await message.answer("Использование: /import_recipe <url>\nПример: /import_recipe https://eda.ru/...")
+async def start_import_url(message: Message, state: FSMContext):
+    await state.set_state(ImportUrl.waiting_for_url)
+    await message.answer(
+        "🔗 Пришли мне ссылку на рецепт.\n"
+        "Лучше всего работает с povarenok.ru, 1000.menu, gastronom.ru.\n\n"
+        "Для отмены: /cancel"
+    )
+
+
+async def import_url_receive(message: Message, state: FSMContext):
+    if message.text and message.text.strip() == "/cancel":
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=main_kb())
         return
 
-    url = args[1].strip()
-    wait_msg = await message.answer("⏳ Парсю рецепт, подожди...")
+    url = (message.text or "").strip()
+    if not url.startswith("http"):
+        await message.answer("Это не похоже на ссылку. Попробуй ещё раз или /cancel")
+        return
 
+    await state.clear()
+    wait = await message.answer("⏳ Парсю рецепт, подожди 10-20 сек...")
     result = await api_post("/recipes/import", {"url": url})
-    await wait_msg.delete()
+    await wait.delete()
 
     if result:
         ing_count = len(result.get("ingredients", []))
@@ -184,24 +236,27 @@ async def cmd_import_recipe(message: Message):
             f"✅ Рецепт импортирован!\n\n"
             f"*{result['title']}*\n"
             f"🍽 Порций: {result.get('base_servings', '?')}\n"
-            f"🥕 Ингредиентов: {ing_count}\n"
-            f"⏱ Готовка: {result.get('cook_time_min') or '?'} мин\n\n"
-            f"Добавь к мероприятию в Mini App 👇",
+            f"🥕 Ингредиентов: {ing_count}",
             parse_mode="Markdown",
-            reply_markup=open_app_kb(),
+            reply_markup=main_kb(),
         )
     else:
-        await message.answer("❌ Не удалось импортировать рецепт. Проверь ссылку или попробуй другой сайт.")
+        await message.answer(
+            "❌ Не удалось импортировать. Возможно сайт не поддерживается или ссылка битая.\n\n"
+            "Попробуй *📝 Рецепт текстом* или пришли *📷 фото* — это сработает с любого сайта.",
+            parse_mode="Markdown",
+            reply_markup=main_kb(),
+        )
 
 
-# --- /import_text ---
+# --- Import text ---
 
-async def cmd_import_text(message: Message, state: FSMContext):
+async def start_import_text(message: Message, state: FSMContext):
     await state.set_state(ImportText.waiting_for_text)
     await message.answer(
         "📝 Пришли мне текст рецепта одним сообщением.\n\n"
         "Можно вставить список ингредиентов + способ готовки в любом формате — "
-        "я попробую разобрать через LLM.\n\n"
+        "я распознаю через LLM.\n\n"
         "Для отмены: /cancel"
     )
 
@@ -209,14 +264,13 @@ async def cmd_import_text(message: Message, state: FSMContext):
 async def import_text_receive(message: Message, state: FSMContext):
     if message.text and message.text.strip() == "/cancel":
         await state.clear()
-        await message.answer("Отменено.")
+        await message.answer("Отменено.", reply_markup=main_kb())
         return
 
     await state.clear()
-    wait_msg = await message.answer("⏳ Парсю текст рецепта через LLM, подожди 10-15 сек...")
-
+    wait = await message.answer("⏳ Распознаю текст через LLM, подожди 10-15 сек...")
     result = await api_post("/recipes/import-text", {"text": message.text or "", "title": None})
-    await wait_msg.delete()
+    await wait.delete()
 
     if result:
         ing_count = len(result.get("ingredients", []))
@@ -224,24 +278,21 @@ async def import_text_receive(message: Message, state: FSMContext):
             f"✅ Рецепт сохранён!\n\n"
             f"*{result['title']}*\n"
             f"🍽 Порций: {result.get('base_servings', '?')}\n"
-            f"🥕 Ингредиентов: {ing_count}\n\n"
-            f"Добавь к мероприятию в Mini App 👇",
+            f"🥕 Ингредиентов: {ing_count}",
             parse_mode="Markdown",
-            reply_markup=open_app_kb(),
+            reply_markup=main_kb(),
         )
     else:
-        await message.answer("❌ Не получилось распознать рецепт. Попробуй ещё раз.")
+        await message.answer("❌ Не получилось распознать. Попробуй ещё раз.", reply_markup=main_kb())
 
 
-# --- /sync_calendar ---
+# --- Photo recognition (auto) ---
 
 async def handle_photo(message: Message, bot: Bot):
-    """Auto-parse any incoming photo as a recipe via Qwen Vision."""
     if not message.photo:
         return
     wait = await message.answer("📷 Распознаю рецепт с фото через LLM, подожди 15-20 сек...")
 
-    # Take the largest photo size
     photo: PhotoSize = max(message.photo, key=lambda p: p.width * p.height)
     file = await bot.get_file(photo.file_id)
     buf = BytesIO()
@@ -259,51 +310,26 @@ async def handle_photo(message: Message, bot: Bot):
             f"*{result['title']}*\n"
             f"🍽 Порций: {result.get('base_servings', '?')}\n"
             f"🥕 Ингредиентов: {ing_count}\n\n"
-            f"Если что-то распозналось неправильно — поправь вручную в Mini App 👇",
+            f"Если что-то распозналось неправильно — поправь вручную в Mini App.",
             parse_mode="Markdown",
-            reply_markup=open_app_kb(),
+            reply_markup=main_kb(),
         )
     else:
         await message.answer(
-            "❌ Не получилось распознать рецепт с фото. "
-            "Попробуй чёткое фото или скриншот с хорошо видимым текстом."
+            "❌ Не получилось распознать рецепт. "
+            "Попробуй более чёткое фото или скриншот.",
+            reply_markup=main_kb(),
         )
 
 
-async def cmd_sync_calendar(message: Message):
-    # Check if Google Calendar is connected
-    status = await api_get("/calendar/status")
-    if not status or not status.get("connected"):
-        auth = await api_get("/calendar/oauth/start")
-        url = auth.get("url") if isinstance(auth, dict) else None
-        if url:
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🔗 Подключить Google Calendar", url=url)
-            ]])
-            await message.answer(
-                "Google Calendar не подключён.\nНажми кнопку для авторизации:",
-                reply_markup=kb,
-            )
-        else:
-            await message.answer("❌ Не удалось получить ссылку для авторизации. Убедись, что GOOGLE_CLIENT_ID настроен.")
-        return
-
-    wait_msg = await message.answer("🔄 Синхронизирую события...")
-    result = await api_post("/calendar/sync", {})
-    await wait_msg.delete()
-
-    if result is None:
-        await message.answer("❌ Ошибка синхронизации.")
-        return
-
-    created = result.get("created", 0)
-    updated = result.get("updated", 0)
+async def photo_hint(message: Message):
+    """When user clicks '📷 Рецепт с фото' button — just explain."""
     await message.answer(
-        f"✅ Синхронизация завершена!\n\n"
-        f"➕ Создано мероприятий: {created}\n"
-        f"🔄 Обновлено: {updated}\n\n"
-        f"Посмотри список событий в Mini App 👇",
-        reply_markup=open_app_kb(),
+        "📷 Просто *пришли мне фото* рецепта одним сообщением — "
+        "я сам его распознаю.\n\n"
+        "Подойдёт страница книги, скриншот Pinterest/Instagram, рукописный рецепт и т.п.",
+        parse_mode="Markdown",
+        reply_markup=main_kb(),
     )
 
 
@@ -315,22 +341,28 @@ async def main():
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Commands
     dp.message.register(cmd_start, CommandStart())
-    dp.message.register(cmd_new_event, Command("new_event"))
-    dp.message.register(cmd_import_recipe, Command("import_recipe"))
-    dp.message.register(cmd_import_text, Command("import_text"))
-    dp.message.register(cmd_sync_calendar, Command("sync_calendar"))
+    dp.message.register(cmd_start, Command("menu"))
 
-    # FSM: new_event flow
+    # Button-text matching (must come BEFORE FSM handlers so buttons always work)
+    dp.message.register(start_new_event, F.text == BTN_NEW_EVENT)
+    dp.message.register(start_import_url, F.text == BTN_IMPORT_URL)
+    dp.message.register(start_import_text, F.text == BTN_IMPORT_TEXT)
+    dp.message.register(photo_hint, F.text == BTN_IMPORT_PHOTO_INFO)
+    dp.message.register(show_help, F.text == BTN_HELP)
+
+    # FSM: new_event
     dp.message.register(new_event_title, NewEvent.title)
     dp.message.register(new_event_skip_date, NewEvent.date, Command("skip"))
     dp.message.register(new_event_date, NewEvent.date)
     dp.message.register(new_event_guests, NewEvent.guests)
 
-    # FSM: import_text
+    # FSM: import url / text
+    dp.message.register(import_url_receive, ImportUrl.waiting_for_url)
     dp.message.register(import_text_receive, ImportText.waiting_for_text)
 
-    # Auto-handle any photo sent to the bot
+    # Photos — auto-parse
     dp.message.register(handle_photo, F.photo)
 
     log.info("Bot started (polling)...")

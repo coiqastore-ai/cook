@@ -7,10 +7,14 @@ const router = useRouter();
 const events = ref<Event[]>([]);
 const loading = ref(false);
 const showForm = ref(false);
-const calendarStatus = ref<boolean | null>(null);
-const calendarLoading = ref(false);
 
 const form = ref({ title: "", date: "", guests_count: 1, notes: "" });
+
+// Telegram WebApp user id (if launched from inside Telegram)
+function getTelegramUserId(): number | null {
+  const tg = (window as any).Telegram?.WebApp;
+  return tg?.initDataUnsafe?.user?.id ?? null;
+}
 
 async function load() {
   loading.value = true;
@@ -24,39 +28,11 @@ async function createEvent() {
     date: form.value.date || null,
     guests_count: form.value.guests_count,
     notes: form.value.notes || undefined,
+    telegram_user_id: getTelegramUserId() ?? undefined,
   });
   showForm.value = false;
   form.value = { title: "", date: "", guests_count: 1, notes: "" };
   await load();
-}
-
-async function checkCalendar() {
-  try { calendarStatus.value = (await api.calendar.status()).connected; }
-  catch { calendarStatus.value = false; }
-}
-
-async function syncCalendar() {
-  calendarLoading.value = true;
-  try {
-    // Re-check status first (might have changed)
-    const status = await api.calendar.status();
-    calendarStatus.value = status.connected;
-
-    if (!status.connected) {
-      // Open OAuth flow in a new tab — backend will 302 to Google
-      const base = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
-      window.open(`${base}/calendar/oauth/start`, "_blank");
-      alert("Открыта вкладка с Google для авторизации. После завершения нажми «Синхронизировать» снова.");
-      return;
-    }
-    const result = await api.calendar.sync();
-    alert(`✅ Синхронизировано!\nСоздано: ${result.created}, обновлено: ${result.updated}`);
-    await load();
-  } catch (e) {
-    alert("Ошибка синхронизации: " + (e instanceof Error ? e.message : String(e)));
-  } finally {
-    calendarLoading.value = false;
-  }
 }
 
 function formatDate(d: string | null) {
@@ -64,7 +40,7 @@ function formatDate(d: string | null) {
   return new Date(d).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
 }
 
-onMounted(() => { load(); checkCalendar(); });
+onMounted(() => { load(); });
 </script>
 
 <template>
@@ -76,15 +52,6 @@ onMounted(() => { load(); checkCalendar(); });
         + Создать
       </button>
     </div>
-
-    <!-- Google Calendar sync -->
-    <button @click="syncCalendar" :disabled="calendarLoading"
-      class="w-full mb-4 flex items-center justify-center gap-2 border border-gray-300 rounded-lg py-2 text-sm text-gray-600 bg-white disabled:opacity-50">
-      <span>📆</span>
-      <span v-if="calendarLoading">Синхронизация...</span>
-      <span v-else-if="calendarStatus">Синхронизировать Google Calendar</span>
-      <span v-else>Подключить Google Calendar</span>
-    </button>
 
     <!-- Create event form -->
     <div v-if="showForm" class="bg-white rounded-xl border border-gray-200 p-4 mb-4 space-y-3">

@@ -1,4 +1,8 @@
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -111,3 +115,55 @@ async def remove_recipe_from_event(
     await session.delete(er)
     await session.commit()
     return await _get_event_or_404(event_id, session)
+
+
+@router.get("/{event_id}/ical")
+async def event_ical(event_id: int, session: AsyncSession = Depends(get_session)):
+    """Download event as .ics file — works with Google Calendar, Apple Calendar, Outlook etc."""
+    event = await session.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+    if not event.date:
+        raise HTTPException(422, "Event has no date set")
+
+    dt_start = event.date if event.date.tzinfo else event.date.replace(tzinfo=timezone.utc)
+    dt_end = dt_start + timedelta(hours=3)  # 3-hour default duration
+    dt_stamp = datetime.now(timezone.utc)
+    fmt = "%Y%m%dT%H%M%SZ"
+
+    description = []
+    if event.guests_count:
+        description.append(f"Гостей: {event.guests_count}")
+    if event.notes:
+        description.append(event.notes)
+    description.append("Открыть в Mealie: https://cook.coiqa.ru")
+    desc_text = "\\n".join(description)
+
+    ics = (
+        "BEGIN:VCALENDAR\r\n"
+        "VERSION:2.0\r\n"
+        "PRODID:-//Mealie Bot//RU\r\n"
+        "CALSCALE:GREGORIAN\r\n"
+        "METHOD:PUBLISH\r\n"
+        "BEGIN:VEVENT\r\n"
+        f"UID:mealie-event-{event.id}-{uuid4().hex[:8]}@cook.coiqa.ru\r\n"
+        f"DTSTAMP:{dt_stamp.strftime(fmt)}\r\n"
+        f"DTSTART:{dt_start.astimezone(timezone.utc).strftime(fmt)}\r\n"
+        f"DTEND:{dt_end.astimezone(timezone.utc).strftime(fmt)}\r\n"
+        f"SUMMARY:{event.title}\r\n"
+        f"DESCRIPTION:{desc_text}\r\n"
+        "BEGIN:VALARM\r\n"
+        "TRIGGER:-P1D\r\n"
+        "ACTION:DISPLAY\r\n"
+        f"DESCRIPTION:Завтра — {event.title}\r\n"
+        "END:VALARM\r\n"
+        "END:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    )
+
+    safe_title = "".join(c if c.isalnum() else "_" for c in event.title)[:50]
+    return Response(
+        content=ics,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.ics"'},
+    )

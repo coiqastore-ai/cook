@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { api, fileToBase64, type Event, type Recipe } from "../api";
+
+const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -16,6 +18,8 @@ const importTitle = ref("");
 const importImageFile = ref<File | null>(null);
 const importImagePreview = ref<string | null>(null);
 const importing = ref(false);
+
+const icalUrl = computed(() => `${API_BASE.replace(/\/$/, "")}/events/${props.id}/ical`);
 
 function onFileSelected(e: globalThis.Event) {
   const f = (e.target as HTMLInputElement).files?.[0];
@@ -106,7 +110,7 @@ onMounted(load);
     </div>
 
     <!-- Action buttons -->
-    <div class="grid grid-cols-2 gap-2 mb-4">
+    <div class="grid grid-cols-2 gap-2 mb-2">
       <button @click="router.push(`/events/${id}/shopping`)"
         class="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl py-3 text-sm font-medium">
         🛒 Закупка
@@ -116,6 +120,11 @@ onMounted(load);
         ⏱ Таймлайн
       </button>
     </div>
+    <!-- Add to calendar -->
+    <a v-if="event.date" :href="icalUrl"
+      class="block w-full mb-4 bg-purple-50 border border-purple-200 text-purple-700 rounded-xl py-3 text-sm font-medium text-center">
+      📅 Добавить в календарь (.ics)
+    </a>
 
     <!-- Recipes section -->
     <div class="flex items-center justify-between mb-3">

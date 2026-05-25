@@ -57,7 +57,7 @@ export const api = {
   events: {
     list: () => req<Event[]>("GET", "/events/"),
     get: (id: number) => req<Event>("GET", `/events/${id}`),
-    create: (data: { title: string; date?: string | null; guests_count?: number; notes?: string }) =>
+    create: (data: { title: string; date?: string | null; guests_count?: number; notes?: string; telegram_user_id?: number }) =>
       req<Event>("POST", "/events/", data),
     update: (id: number, data: Partial<Event>) => req<Event>("PATCH", `/events/${id}`, data),
     delete: (id: number) => req<void>("DELETE", `/events/${id}`),

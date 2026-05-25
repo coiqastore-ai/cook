@@ -18,6 +18,7 @@ class EventCreate(BaseModel):
     date: datetime | None = None
     guests_count: int = 1
     notes: str | None = None
+    telegram_user_id: int | None = None
 
 
 class EventUpdate(BaseModel):
