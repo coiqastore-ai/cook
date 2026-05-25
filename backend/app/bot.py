@@ -156,6 +156,19 @@ async def cmd_start(message: Message, state: FSMContext):
     )
 
 
+async def cmd_whoami(message: Message):
+    if not message.from_user:
+        await message.answer("Не вижу пользователя.")
+        return
+    u = message.from_user
+    await message.answer(
+        f"Твой Telegram ID: `{u.id}`\n"
+        f"Username: @{u.username or '—'}\n"
+        f"Имя: {u.full_name}",
+        parse_mode="Markdown",
+    )
+
+
 async def show_help(message: Message):
     await message.answer(
         "📖 *Как пользоваться:*\n\n"
@@ -484,6 +497,7 @@ async def main():
     # Commands
     dp.message.register(cmd_start, CommandStart())
     dp.message.register(cmd_start, Command("menu"))
+    dp.message.register(cmd_whoami, Command("whoami"))
 
     # Button-text matching (must come BEFORE FSM handlers so buttons always work)
     dp.message.register(start_new_event, F.text == BTN_NEW_EVENT)
