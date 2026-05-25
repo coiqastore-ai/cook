@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { api, fileToBase64, type Recipe, type Ingredient } from "../api";
+import { api, fileToBase64, type Recipe, type Ingredient, type Event } from "../api";
+
+function getTelegramUserId(): number | null {
+  const tg = (window as any).Telegram?.WebApp;
+  return tg?.initDataUnsafe?.user?.id ?? null;
+}
 
 const recipes = ref<Recipe[]>([]);
 const loading = ref(false);
@@ -19,6 +24,30 @@ const addingTo = ref<number | null>(null);
 const newIng = ref({ name: "", quantity: "" as string | number, unit: "" });
 const editingIng = ref<number | null>(null);
 const editIng = ref({ name: "", quantity: "" as string | number, unit: "" });
+
+// "Add to event" modal
+const addToEventFor = ref<number | null>(null);
+const userEvents = ref<Event[]>([]);
+const addingToEventBusy = ref(false);
+
+async function openAddToEvent(recipeId: number) {
+  addToEventFor.value = recipeId;
+  const uid = getTelegramUserId();
+  userEvents.value = await api.events.list(uid ?? undefined);
+}
+
+async function attachToEvent(eventId: number, recipeId: number) {
+  addingToEventBusy.value = true;
+  try {
+    await api.events.addRecipe(eventId, recipeId);
+    addToEventFor.value = null;
+    alert("✅ Рецепт добавлен в событие");
+  } catch (e) {
+    alert("Не получилось добавить: " + (e instanceof Error ? e.message : e));
+  } finally {
+    addingToEventBusy.value = false;
+  }
+}
 
 async function load() {
   loading.value = true;
@@ -264,12 +293,46 @@ onMounted(load);
           </ul>
           <p v-else class="text-xs text-gray-400 italic">Ингредиенты не указаны</p>
 
+          <!-- Primary action: add to event -->
+          <button @click="openAddToEvent(r.id)"
+            class="w-full bg-green-600 text-white py-2 rounded-lg text-sm font-medium mt-2">
+            ➕ Добавить в событие
+          </button>
+
           <div class="flex gap-3 pt-2 border-t border-gray-100">
             <a v-if="r.source_url" :href="r.source_url" target="_blank"
               class="text-xs text-green-600 underline">Открыть оригинал →</a>
             <button @click="deleteRecipe(r.id)" class="text-xs text-red-500 ml-auto">Удалить рецепт</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- "Add to event" modal -->
+    <div v-if="addToEventFor !== null" class="fixed inset-0 bg-black/40 z-40 flex items-end"
+      @click.self="addToEventFor = null">
+      <div class="bg-white rounded-t-2xl w-full max-h-[70dvh] overflow-y-auto p-4 max-w-[480px] mx-auto">
+        <h3 class="font-semibold text-gray-800 mb-3">В какое событие добавить?</h3>
+        <div v-if="!userEvents.length" class="text-center py-6 text-gray-400 text-sm">
+          У тебя ещё нет событий. Создай событие на вкладке «События».
+        </div>
+        <div v-else class="space-y-2">
+          <button v-for="ev in userEvents" :key="ev.id"
+            :disabled="addingToEventBusy"
+            @click="attachToEvent(ev.id, addToEventFor!)"
+            class="w-full flex items-center justify-between p-3 border border-gray-200 rounded-lg text-left hover:border-green-300 disabled:opacity-50">
+            <div>
+              <p class="font-medium text-sm text-gray-800">{{ ev.title }}</p>
+              <p class="text-xs text-gray-500">
+                <span v-if="ev.date">{{ new Date(ev.date).toLocaleDateString("ru-RU") }} ·</span>
+                {{ ev.event_recipes.length }} рецептов · {{ ev.guests_count }} гостей
+              </p>
+            </div>
+            <span class="text-green-600 text-sm">→</span>
+          </button>
+        </div>
+        <button @click="addToEventFor = null"
+          class="w-full mt-3 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Отмена</button>
       </div>
     </div>
   </div>
