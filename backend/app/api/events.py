@@ -161,9 +161,10 @@ async def event_ical(event_id: int, session: AsyncSession = Depends(get_session)
         "END:VCALENDAR\r\n"
     )
 
-    safe_title = "".join(c if c.isalnum() else "_" for c in event.title)[:50]
+    # ASCII filename for the header (HTTP headers must be latin-1);
+    # full Russian title is preserved inside the .ics SUMMARY.
     return Response(
         content=ics,
         media_type="text/calendar; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{safe_title}.ics"'},
+        headers={"Content-Disposition": f'attachment; filename="event-{event.id}.ics"'},
     )
