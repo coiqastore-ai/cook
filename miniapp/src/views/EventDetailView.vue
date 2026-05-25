@@ -5,6 +5,11 @@ import { api, fileToBase64, type Event, type Recipe } from "../api";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
+function getTelegramUserId(): number | null {
+  const tg = (window as any).Telegram?.WebApp;
+  return tg?.initDataUnsafe?.user?.id ?? null;
+}
+
 const props = defineProps<{ id: string }>();
 const router = useRouter();
 const event = ref<Event | null>(null);
@@ -56,17 +61,18 @@ async function load() {
 async function importRecipe() {
   importing.value = true;
   try {
+    const uid = getTelegramUserId() ?? undefined;
     let recipe;
     if (importMode.value === "url") {
       if (!importUrl.value.trim()) return;
-      recipe = await api.recipes.import(importUrl.value.trim());
+      recipe = await api.recipes.import(importUrl.value.trim(), uid);
     } else if (importMode.value === "text") {
       if (!importText.value.trim()) return;
-      recipe = await api.recipes.importText(importText.value, importTitle.value || undefined);
+      recipe = await api.recipes.importText(importText.value, importTitle.value || undefined, uid);
     } else {
       if (!importImageFile.value) return;
       const b64 = await fileToBase64(importImageFile.value);
-      recipe = await api.recipes.importImage(b64, importTitle.value || undefined);
+      recipe = await api.recipes.importImage(b64, importTitle.value || undefined, uid);
     }
     await api.events.addRecipe(Number(props.id), recipe.id);
     importUrl.value = "";
@@ -109,7 +115,8 @@ async function removeRecipe(recipeId: number) {
 }
 
 async function openLibrary() {
-  allRecipes.value = await api.recipes.list();
+  const uid = getTelegramUserId() ?? undefined;
+  allRecipes.value = await api.recipes.list(uid);
   showLibrary.value = true;
 }
 

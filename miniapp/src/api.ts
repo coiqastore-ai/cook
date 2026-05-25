@@ -80,13 +80,15 @@ export const api = {
   },
 
   recipes: {
-    list: () => req<Recipe[]>("GET", "/recipes/"),
+    list: (telegramUserId?: number) =>
+      req<Recipe[]>("GET", telegramUserId ? `/recipes/?telegram_user_id=${telegramUserId}` : "/recipes/"),
     get: (id: number) => req<Recipe>("GET", `/recipes/${id}`),
-    import: (url: string) => req<Recipe>("POST", "/recipes/import", { url }),
-    importText: (text: string, title?: string) =>
-      req<Recipe>("POST", "/recipes/import-text", { text, title }),
-    importImage: (imageBase64: string, title?: string) =>
-      req<Recipe>("POST", "/recipes/import-image", { image_base64: imageBase64, title }),
+    import: (url: string, telegramUserId?: number) =>
+      req<Recipe>("POST", "/recipes/import", { url, telegram_user_id: telegramUserId }),
+    importText: (text: string, title?: string, telegramUserId?: number) =>
+      req<Recipe>("POST", "/recipes/import-text", { text, title, telegram_user_id: telegramUserId }),
+    importImage: (imageBase64: string, title?: string, telegramUserId?: number) =>
+      req<Recipe>("POST", "/recipes/import-image", { image_base64: imageBase64, title, telegram_user_id: telegramUserId }),
     create: (data: { title: string; source_url?: string; base_servings?: number }) =>
       req<Recipe>("POST", "/recipes/", data),
     update: (id: number, data: Partial<Recipe>) => req<Recipe>("PATCH", `/recipes/${id}`, data),

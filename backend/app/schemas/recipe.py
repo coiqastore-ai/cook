@@ -22,6 +22,7 @@ class RecipeOut(BaseModel):
     cook_time_min: int | None
     prep_time_min: int | None
     created_at: datetime
+    telegram_user_id: int | None = None
     ingredients: list[IngredientOut] = []
 
     model_config = {"from_attributes": True}
@@ -29,3 +30,4 @@ class RecipeOut(BaseModel):
 
 class ImportRecipeRequest(BaseModel):
     url: str
+    telegram_user_id: int | None = None

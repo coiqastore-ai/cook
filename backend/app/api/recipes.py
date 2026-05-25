@@ -15,6 +15,7 @@ router = APIRouter(prefix="/recipes", tags=["recipes"])
 class ImportTextRequest(BaseModel):
     text: str
     title: str | None = None
+    telegram_user_id: int | None = None
 
 
 class ImportImageRequest(BaseModel):
@@ -23,6 +24,7 @@ class ImportImageRequest(BaseModel):
     image_base64: str | None = None
     images_base64: list[str] | None = None
     title: str | None = None
+    telegram_user_id: int | None = None
 
 
 class IngredientCreate(BaseModel):
@@ -44,6 +46,7 @@ class RecipeCreate(BaseModel):
     cook_time_min: int | None = None
     prep_time_min: int | None = None
     instructions: list[str] = []
+    telegram_user_id: int | None = None
 
 
 class RecipeUpdate(BaseModel):
@@ -58,10 +61,15 @@ class RecipeUpdate(BaseModel):
 # ---------- READ ----------
 
 @router.get("/", response_model=list[RecipeOut])
-async def list_recipes(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(Recipe).options(selectinload(Recipe.ingredients)).order_by(Recipe.created_at.desc())
-    )
+async def list_recipes(
+    telegram_user_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Library view. If telegram_user_id is given, return only recipes owned by that user."""
+    query = select(Recipe).options(selectinload(Recipe.ingredients)).order_by(Recipe.created_at.desc())
+    if telegram_user_id is not None:
+        query = query.where(Recipe.telegram_user_id == telegram_user_id)
+    result = await session.execute(query)
     return result.scalars().all()
 
 
@@ -78,7 +86,9 @@ async def get_recipe(recipe_id: int, session: AsyncSession = Depends(get_session
 
 # ---------- IMPORT ----------
 
-async def _save_parsed_recipe(data: dict, session: AsyncSession) -> Recipe:
+async def _save_parsed_recipe(
+    data: dict, session: AsyncSession, telegram_user_id: int | None = None
+) -> Recipe:
     recipe = Recipe(
         title=data["title"],
         source_url=data.get("source_url"),
@@ -86,6 +96,7 @@ async def _save_parsed_recipe(data: dict, session: AsyncSession) -> Recipe:
         instructions=data.get("instructions"),
         cook_time_min=data.get("cook_time_min"),
         prep_time_min=data.get("prep_time_min"),
+        telegram_user_id=telegram_user_id,
     )
     session.add(recipe)
     await session.flush()
@@ -120,7 +131,7 @@ async def import_recipe(body: ImportRecipeRequest, session: AsyncSession = Depen
         data = await recipe_parser.parse_recipe(body.url)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe: {e}")
-    return await _save_parsed_recipe(data, session)
+    return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
 
 
 @router.post("/import-text", response_model=RecipeOut, status_code=201)
@@ -131,7 +142,7 @@ async def import_recipe_from_text(body: ImportTextRequest, session: AsyncSession
         data = await recipe_parser.parse_recipe_from_text(body.text, title_hint=body.title)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe: {e}")
-    return await _save_parsed_recipe(data, session)
+    return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
 
 
 @router.post("/import-image", response_model=RecipeOut, status_code=201)
@@ -144,7 +155,7 @@ async def import_recipe_from_image(body: ImportImageRequest, session: AsyncSessi
         data = await recipe_parser.parse_recipe_from_images(images, title_hint=body.title)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe from image: {e}")
-    return await _save_parsed_recipe(data, session)
+    return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
 
 
 # ---------- MANUAL CREATE / UPDATE ----------

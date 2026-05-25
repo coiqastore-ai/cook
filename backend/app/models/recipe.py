@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, func
+from sqlalchemy import BigInteger, DateTime, Float, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,8 @@ class Recipe(Base):
     cook_time_min: Mapped[int | None] = mapped_column(Integer)
     prep_time_min: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Owner — recipe is private to this Telegram user (null = legacy/orphan)
+    telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
 
     ingredients: Mapped[list["Ingredient"]] = relationship(back_populates="recipe", cascade="all, delete-orphan")
     event_recipes: Mapped[list["EventRecipe"]] = relationship(

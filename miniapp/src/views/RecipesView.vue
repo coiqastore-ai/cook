@@ -51,7 +51,12 @@ async function attachToEvent(eventId: number, recipeId: number) {
 
 async function load() {
   loading.value = true;
-  try { recipes.value = await api.recipes.list(); } finally { loading.value = false; }
+  try {
+    const uid = getTelegramUserId();
+    recipes.value = await api.recipes.list(uid ?? undefined);
+  } finally {
+    loading.value = false;
+  }
 }
 
 function onFileSelected(e: globalThis.Event) {
@@ -64,16 +69,17 @@ function onFileSelected(e: globalThis.Event) {
 async function importRecipe() {
   importing.value = true;
   try {
+    const uid = getTelegramUserId() ?? undefined;
     if (importMode.value === "url") {
       if (!importUrl.value.trim()) return;
-      await api.recipes.import(importUrl.value.trim());
+      await api.recipes.import(importUrl.value.trim(), uid);
     } else if (importMode.value === "text") {
       if (!importText.value.trim()) return;
-      await api.recipes.importText(importText.value, importTitle.value || undefined);
+      await api.recipes.importText(importText.value, importTitle.value || undefined, uid);
     } else {
       if (!importImageFile.value) return;
       const b64 = await fileToBase64(importImageFile.value);
-      await api.recipes.importImage(b64, importTitle.value || undefined);
+      await api.recipes.importImage(b64, importTitle.value || undefined, uid);
     }
     resetImport();
     showImport.value = false;

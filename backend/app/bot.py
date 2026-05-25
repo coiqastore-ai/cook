@@ -271,7 +271,10 @@ async def import_url_receive(message: Message, state: FSMContext):
 
     await state.clear()
     wait = await message.answer("⏳ Парсю рецепт, подожди 10-20 сек...")
-    result = await api_post("/recipes/import", {"url": url})
+    result = await api_post("/recipes/import", {
+        "url": url,
+        "telegram_user_id": message.from_user.id if message.from_user else None,
+    })
     await wait.delete()
 
     if result:
@@ -313,7 +316,11 @@ async def import_text_receive(message: Message, state: FSMContext):
 
     await state.clear()
     wait = await message.answer("⏳ Распознаю текст через LLM, подожди 10-15 сек...")
-    result = await api_post("/recipes/import-text", {"text": message.text or "", "title": None})
+    result = await api_post("/recipes/import-text", {
+        "text": message.text or "",
+        "title": None,
+        "telegram_user_id": message.from_user.id if message.from_user else None,
+    })
     await wait.delete()
 
     if result:
@@ -359,7 +366,11 @@ async def _flush_media_group(bot: Bot, gid: str):
     )
     result = await api_post(
         "/recipes/import-image",
-        {"images_base64": images, "title": caption},
+        {
+            "images_base64": images,
+            "title": caption,
+            "telegram_user_id": message.from_user.id if message.from_user else None,
+        },
     )
     try:
         await wait.delete()
@@ -407,7 +418,11 @@ async def handle_photo(message: Message, bot: Bot):
 
     # Single photo path
     wait = await message.answer("📷 Распознаю рецепт с фото через LLM, подожди 15-20 сек...")
-    result = await api_post("/recipes/import-image", {"image_base64": image_b64, "title": caption})
+    result = await api_post("/recipes/import-image", {
+        "image_base64": image_b64,
+        "title": caption,
+        "telegram_user_id": message.from_user.id if message.from_user else None,
+    })
     try:
         await wait.delete()
     except Exception:
