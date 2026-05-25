@@ -1,0 +1,22 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiogram>=3.28.2",
+    "alembic>=1.18.4",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.136.3",
+    "google-api-python-client>=2.196.0",
+    "google-auth>=2.53.0",
+    "google-auth-httplib2>=0.4.0",
+    "google-auth-oauthlib>=1.4.0",
+    "httpx>=0.28.1",
+    "openai>=2.38.0",
+    "pydantic-settings>=2.14.1",
+    "recipe-scrapers>=15.11.0",
+    "sqlalchemy[asyncio]>=2.0.50",
+    "uvicorn[standard]>=0.48.0",
+]

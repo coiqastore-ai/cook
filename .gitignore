@@ -1,0 +1,45 @@
+# Secrets
+.env
+.env.local
+.env.production
+backend/.env
+backend/token.json
+backend/.oauth_state.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+miniapp/dist/
+miniapp/.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+caddy_data/
+caddy_config/
+
+# OS
+Thumbs.db
+desktop.ini

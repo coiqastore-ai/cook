@@ -1,0 +1,12 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.*
+token.json
+.oauth_state.json
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info

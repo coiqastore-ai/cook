@@ -1,0 +1,170 @@
+<script setup lang="ts">
+import { ref, onMounted } from "vue";
+import { useRouter } from "vue-router";
+import { api, type Event, type Recipe } from "../api";
+
+const props = defineProps<{ id: string }>();
+const router = useRouter();
+const event = ref<Event | null>(null);
+const allRecipes = ref<Recipe[]>([]);
+const showImport = ref(false);
+const showLibrary = ref(false);
+const importUrl = ref("");
+const importing = ref(false);
+
+async function load() {
+  event.value = await api.events.get(Number(props.id));
+}
+
+async function importRecipe() {
+  if (!importUrl.value.trim()) return;
+  importing.value = true;
+  try {
+    const recipe = await api.recipes.import(importUrl.value.trim());
+    await api.events.addRecipe(Number(props.id), recipe.id);
+    importUrl.value = "";
+    showImport.value = false;
+    await load();
+  } catch {
+    alert("Не удалось импортировать рецепт. Проверьте ссылку.");
+  } finally {
+    importing.value = false;
+  }
+}
+
+async function addFromLibrary(recipeId: number) {
+  await api.events.addRecipe(Number(props.id), recipeId);
+  showLibrary.value = false;
+  await load();
+}
+
+async function updateMultiplier(recipeId: number, value: string) {
+  const m = parseFloat(value);
+  if (isNaN(m) || m <= 0) return;
+  await api.events.updateMultiplier(Number(props.id), recipeId, m);
+  await load();
+}
+
+async function removeRecipe(recipeId: number) {
+  if (!confirm("Убрать рецепт из события?")) return;
+  await api.events.removeRecipe(Number(props.id), recipeId);
+  await load();
+}
+
+async function openLibrary() {
+  allRecipes.value = await api.recipes.list();
+  showLibrary.value = true;
+}
+
+function linkedIds() {
+  return new Set(event.value?.event_recipes.map(er => er.recipe_id));
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <div class="p-4" v-if="event">
+    <!-- Header -->
+    <div class="flex items-center gap-2 mb-4">
+      <button @click="router.back()" class="text-gray-500 text-lg">←</button>
+      <h1 class="text-xl font-semibold text-gray-800 flex-1 truncate">{{ event.title }}</h1>
+    </div>
+
+    <!-- Event info -->
+    <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4 text-sm text-gray-600 space-y-1">
+      <div v-if="event.date">📅 {{ new Date(event.date).toLocaleString("ru-RU") }}</div>
+      <div>👥 Гостей: {{ event.guests_count }}</div>
+      <div v-if="event.notes" class="text-gray-500">{{ event.notes }}</div>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="grid grid-cols-2 gap-2 mb-4">
+      <button @click="router.push(`/events/${id}/shopping`)"
+        class="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl py-3 text-sm font-medium">
+        🛒 Закупка
+      </button>
+      <button @click="router.push(`/events/${id}/timeline`)"
+        class="bg-blue-50 border border-blue-200 text-blue-700 rounded-xl py-3 text-sm font-medium">
+        ⏱ Таймлайн
+      </button>
+    </div>
+
+    <!-- Recipes section -->
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-medium text-gray-800">Рецепты ({{ event.event_recipes.length }})</h2>
+      <div class="flex gap-2">
+        <button @click="showImport = !showImport" class="text-sm text-green-600 font-medium">+ URL</button>
+        <button @click="openLibrary" class="text-sm text-blue-600 font-medium">+ Библиотека</button>
+      </div>
+    </div>
+
+    <!-- Import by URL -->
+    <div v-if="showImport" class="bg-white rounded-xl border border-gray-200 p-3 mb-3 space-y-2">
+      <input v-model="importUrl" placeholder="https://..." class="input" />
+      <div class="flex gap-2">
+        <button @click="importRecipe" :disabled="importing" class="btn-primary flex-1">
+          {{ importing ? "Импортирую..." : "Импортировать" }}
+        </button>
+        <button @click="showImport = false" class="btn-ghost flex-1">Отмена</button>
+      </div>
+    </div>
+
+    <!-- Library modal -->
+    <div v-if="showLibrary" class="fixed inset-0 bg-black/40 z-40 flex items-end" @click.self="showLibrary = false">
+      <div class="bg-white rounded-t-2xl w-full max-h-[70dvh] overflow-y-auto p-4">
+        <h3 class="font-semibold text-gray-800 mb-3">Выбери рецепт</h3>
+        <div v-if="!allRecipes.length" class="text-center py-6 text-gray-400">Рецептов нет. Импортируй сначала.</div>
+        <div v-else class="space-y-2">
+          <div v-for="r in allRecipes" :key="r.id"
+            class="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+            <div>
+              <p class="font-medium text-sm text-gray-800">{{ r.title }}</p>
+              <p class="text-xs text-gray-500">{{ r.base_servings }} порций · {{ r.ingredients.length }} ингредиентов</p>
+            </div>
+            <button
+              v-if="!linkedIds().has(r.id)"
+              @click="addFromLibrary(r.id)"
+              class="text-sm text-green-600 font-medium px-3 py-1 border border-green-200 rounded-lg">
+              Добавить
+            </button>
+            <span v-else class="text-xs text-gray-400">Добавлен</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recipe list -->
+    <div v-if="!event.event_recipes.length" class="text-center py-8 text-gray-400 text-sm">
+      Рецепты не добавлены
+    </div>
+    <div v-else class="space-y-3">
+      <div v-for="er in event.event_recipes" :key="er.recipe_id"
+        class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="flex justify-between items-start mb-2">
+          <p class="font-medium text-gray-800 flex-1 pr-2">{{ er.recipe.title }}</p>
+          <button @click="removeRecipe(er.recipe_id)" class="text-gray-400 hover:text-red-500 text-sm">✕</button>
+        </div>
+        <div class="text-xs text-gray-500 mb-3">
+          {{ er.recipe.ingredients.length }} ингр. ·
+          {{ er.recipe.cook_time_min ?? "?" }} мин готовки
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-gray-600">Множитель:</span>
+          <input type="number" :value="er.servings_multiplier" min="0.1" step="0.5"
+            @change="updateMultiplier(er.recipe_id, ($event.target as HTMLInputElement).value)"
+            class="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center" />
+          <span class="text-xs text-gray-400">× {{ er.recipe.base_servings }} порц.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div v-else class="flex items-center justify-center h-40 text-gray-400">Загрузка...</div>
+</template>
+
+<style scoped>
+.input { @apply w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-green-400; }
+.btn-primary { @apply bg-green-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50; }
+.btn-ghost { @apply border border-gray-200 text-gray-600 py-2 rounded-lg text-sm; }
+</style>

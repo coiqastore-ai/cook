@@ -1,0 +1,92 @@
+# Production deployment — встраивается в существующий Traefik на VPS
+# Traefik уже работает в сети n8n_default с resolver mytlschallenge
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mealie
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mealie}
+      POSTGRES_DB: mealie
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mealie
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mealie"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mealie:${POSTGRES_PASSWORD:-mealie}@postgres:5432/mealie
+    volumes:
+      - backend_data:/app/persist
+    networks:
+      - mealie
+      - traefik
+    command: >
+      sh -c "uv run alembic upgrade head &&
+             uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n_default"
+      # API на coiqa.ru/api/*
+      - "traefik.http.routers.mealie-api.rule=Host(`coiqa.ru`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.mealie-api.entrypoints=websecure"
+      - "traefik.http.routers.mealie-api.tls.certresolver=mytlschallenge"
+      # Снимаем префикс /api перед проксированием в FastAPI
+      - "traefik.http.middlewares.mealie-strip.stripprefix.prefixes=/api"
+      - "traefik.http.routers.mealie-api.middlewares=mealie-strip"
+      - "traefik.http.services.mealie-api.loadbalancer.server.port=8000"
+
+  bot:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mealie:${POSTGRES_PASSWORD:-mealie}@postgres:5432/mealie
+      API_BASE: http://backend:8000
+    networks:
+      - mealie
+    command: uv run python -m app.bot_runner
+
+  miniapp:
+    build:
+      context: ./miniapp
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n_default"
+      # Mini App на coiqa.ru (всё кроме /api)
+      - "traefik.http.routers.mealie-app.rule=Host(`coiqa.ru`)"
+      - "traefik.http.routers.mealie-app.entrypoints=websecure"
+      - "traefik.http.routers.mealie-app.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.mealie-app.priority=1"
+      - "traefik.http.services.mealie-app.loadbalancer.server.port=80"
+
+networks:
+  mealie:
+    driver: bridge
+  traefik:
+    external: true
+    name: n8n_default
+
+volumes:
+  postgres_data:
+  backend_data:
