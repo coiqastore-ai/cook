@@ -54,7 +54,7 @@ async function load() {
   try { recipes.value = await api.recipes.list(); } finally { loading.value = false; }
 }
 
-function onFileSelected(e: Event) {
+function onFileSelected(e: globalThis.Event) {
   const f = (e.target as HTMLInputElement).files?.[0];
   if (!f) return;
   importImageFile.value = f;
