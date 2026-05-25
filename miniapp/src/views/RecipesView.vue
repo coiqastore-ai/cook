@@ -49,11 +49,19 @@ async function attachToEvent(eventId: number, recipeId: number) {
   }
 }
 
+const noTgUser = ref(false);
+
 async function load() {
   loading.value = true;
   try {
     const uid = getTelegramUserId();
-    recipes.value = await api.recipes.list(uid ?? undefined);
+    if (!uid) {
+      noTgUser.value = true;
+      recipes.value = [];
+      return;
+    }
+    noTgUser.value = false;
+    recipes.value = await api.recipes.list(uid);
   } finally {
     loading.value = false;
   }
@@ -228,6 +236,11 @@ onMounted(load);
     </div>
 
     <div v-if="loading" class="text-center py-8 text-gray-400">Загрузка...</div>
+
+    <div v-else-if="noTgUser" class="text-center py-12 text-gray-400">
+      <p class="text-4xl mb-2">🔒</p>
+      <p>Открой это приложение через Telegram-бот <strong>@reciptesbot</strong></p>
+    </div>
 
     <div v-else-if="!recipes.length" class="text-center py-12 text-gray-400">
       <p class="text-4xl mb-2">📖</p>

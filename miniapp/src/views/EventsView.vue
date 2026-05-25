@@ -16,11 +16,19 @@ function getTelegramUserId(): number | null {
   return tg?.initDataUnsafe?.user?.id ?? null;
 }
 
+const noTgUser = ref(false);
+
 async function load() {
   loading.value = true;
   try {
     const uid = getTelegramUserId();
-    events.value = await api.events.list(uid ?? undefined);
+    if (!uid) {
+      noTgUser.value = true;
+      events.value = [];
+      return;
+    }
+    noTgUser.value = false;
+    events.value = await api.events.list(uid);
   } finally {
     loading.value = false;
   }
@@ -73,6 +81,12 @@ onMounted(() => { load(); });
 
     <!-- Loading -->
     <div v-if="loading" class="text-center py-8 text-gray-500">Загрузка...</div>
+
+    <!-- Not opened via Telegram -->
+    <div v-else-if="noTgUser" class="text-center py-12 text-gray-400">
+      <p class="text-4xl mb-2">🔒</p>
+      <p>Открой это приложение через Telegram-бот <strong>@reciptesbot</strong></p>
+    </div>
 
     <!-- Empty -->
     <div v-else-if="!events.length" class="text-center py-12 text-gray-400">
