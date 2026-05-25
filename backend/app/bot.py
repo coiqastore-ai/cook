@@ -104,6 +104,18 @@ async def api_post(path: str, data: dict, timeout: float = 180) -> dict | None:
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
 
+    # Force per-chat menu button to override any cached old value (e.g. coiqa.ru → cook.coiqa.ru)
+    try:
+        await message.bot.set_chat_menu_button(
+            chat_id=message.chat.id,
+            menu_button=MenuButtonWebApp(
+                text="Открыть Mealie",
+                web_app=WebAppInfo(url=settings.miniapp_url),
+            ),
+        )
+    except Exception as e:
+        log.warning("Failed to set per-chat menu button: %s", e)
+
     # Deep-link: /start event_<id> → join as collaborator
     args = message.text.split(maxsplit=1) if message.text else []
     if len(args) > 1 and args[1].startswith("event_"):
