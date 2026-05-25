@@ -69,6 +69,35 @@ def _int(value) -> int | None:
         return None
 
 
+async def parse_recipe_from_text(text: str, title_hint: str | None = None) -> dict:
+    """Parse a recipe from raw text (no URL fetching) via LLM."""
+    prompt = f"""Extract recipe data from this text. Return JSON with exactly these fields:
+{{
+  "title": "string (use the user-provided title if given)",
+  "servings": number (default 4 if unclear),
+  "cook_time_min": number or null,
+  "prep_time_min": number or null,
+  "instructions": ["step1", "step2", ...],
+  "ingredients": [{{"name": "string", "quantity": number or null, "unit": "string or null"}}]
+}}
+
+Title hint (if provided): {title_hint or "—"}
+
+Recipe text:
+{text}"""
+
+    data = await llm.smart_json(prompt)
+    return {
+        "title": data.get("title") or title_hint or "Без названия",
+        "source_url": None,
+        "base_servings": int(data.get("servings") or 4),
+        "cook_time_min": data.get("cook_time_min"),
+        "prep_time_min": data.get("prep_time_min"),
+        "instructions": data.get("instructions", []),
+        "ingredients_structured": data.get("ingredients", []),
+    }
+
+
 async def parse_ingredients_text(raw_lines: list[str]) -> list[dict]:
     """Parse a list of raw ingredient strings into structured {name, quantity, unit} via LLM."""
     prompt = f"""Parse these ingredient strings into JSON array. Each element: {{"name": str, "quantity": number or null, "unit": str or null}}.

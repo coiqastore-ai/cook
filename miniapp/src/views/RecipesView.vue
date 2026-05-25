@@ -5,7 +5,10 @@ import { api, type Recipe } from "../api";
 const recipes = ref<Recipe[]>([]);
 const loading = ref(false);
 const showImport = ref(false);
+const importMode = ref<"url" | "text">("url");
 const importUrl = ref("");
+const importText = ref("");
+const importTitle = ref("");
 const importing = ref(false);
 const expanded = ref<number | null>(null);
 
@@ -15,15 +18,24 @@ async function load() {
 }
 
 async function importRecipe() {
-  if (!importUrl.value.trim()) return;
   importing.value = true;
   try {
-    await api.recipes.import(importUrl.value.trim());
+    if (importMode.value === "url") {
+      if (!importUrl.value.trim()) return;
+      await api.recipes.import(importUrl.value.trim());
+    } else {
+      if (!importText.value.trim()) return;
+      await api.recipes.importText(importText.value, importTitle.value || undefined);
+    }
     importUrl.value = "";
+    importText.value = "";
+    importTitle.value = "";
     showImport.value = false;
     await load();
   } catch {
-    alert("Не удалось импортировать. Проверьте ссылку.");
+    alert(importMode.value === "url"
+      ? "Не удалось импортировать. Проверьте ссылку."
+      : "Не удалось распознать рецепт из текста.");
   } finally {
     importing.value = false;
   }
@@ -48,8 +60,28 @@ onMounted(load);
 
     <!-- Import form -->
     <div v-if="showImport" class="bg-white rounded-xl border border-gray-200 p-4 mb-4 space-y-2">
-      <p class="text-sm text-gray-600">Вставь ссылку на рецепт:</p>
-      <input v-model="importUrl" placeholder="https://eda.ru/..." class="input" />
+      <div class="flex gap-1 bg-gray-100 p-1 rounded-lg">
+        <button @click="importMode = 'url'"
+          class="flex-1 py-1.5 text-sm rounded-md"
+          :class="importMode === 'url' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
+          🔗 По ссылке
+        </button>
+        <button @click="importMode = 'text'"
+          class="flex-1 py-1.5 text-sm rounded-md"
+          :class="importMode === 'text' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
+          📝 Текстом
+        </button>
+      </div>
+
+      <input v-if="importMode === 'url'" v-model="importUrl" placeholder="https://povarenok.ru/..." class="input" />
+
+      <template v-else>
+        <input v-model="importTitle" placeholder="Название (опционально)" class="input" />
+        <textarea v-model="importText"
+          placeholder="Вставь рецепт текстом — ингредиенты + способ приготовления..."
+          class="input h-40 resize-none" />
+      </template>
+
       <div class="flex gap-2">
         <button @click="importRecipe" :disabled="importing" class="btn-primary flex-1">
           {{ importing ? "Импортирую..." : "Импортировать" }}

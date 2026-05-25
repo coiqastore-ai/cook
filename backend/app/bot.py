@@ -37,6 +37,10 @@ class NewEvent(StatesGroup):
     guests = State()
 
 
+class ImportText(StatesGroup):
+    waiting_for_text = State()
+
+
 # ---------------------------------------------------------------------------
 # HTTP helpers
 # ---------------------------------------------------------------------------
@@ -79,6 +83,7 @@ async def cmd_start(message: Message):
         "Что умею:\n"
         "• /new_event — создать мероприятие\n"
         "• /import_recipe <url> — импортировать рецепт по ссылке\n"
+        "• /import_text — импортировать рецепт текстом\n"
         "• /sync_calendar — синхронизировать с Google Calendar\n\n"
         "Или открой Mini App для полного интерфейса 👇",
         reply_markup=open_app_kb(),
@@ -185,6 +190,45 @@ async def cmd_import_recipe(message: Message):
         await message.answer("❌ Не удалось импортировать рецепт. Проверь ссылку или попробуй другой сайт.")
 
 
+# --- /import_text ---
+
+async def cmd_import_text(message: Message, state: FSMContext):
+    await state.set_state(ImportText.waiting_for_text)
+    await message.answer(
+        "📝 Пришли мне текст рецепта одним сообщением.\n\n"
+        "Можно вставить список ингредиентов + способ готовки в любом формате — "
+        "я попробую разобрать через LLM.\n\n"
+        "Для отмены: /cancel"
+    )
+
+
+async def import_text_receive(message: Message, state: FSMContext):
+    if message.text and message.text.strip() == "/cancel":
+        await state.clear()
+        await message.answer("Отменено.")
+        return
+
+    await state.clear()
+    wait_msg = await message.answer("⏳ Парсю текст рецепта через LLM, подожди 10-15 сек...")
+
+    result = await api_post("/recipes/import-text", {"text": message.text or "", "title": None})
+    await wait_msg.delete()
+
+    if result:
+        ing_count = len(result.get("ingredients", []))
+        await message.answer(
+            f"✅ Рецепт сохранён!\n\n"
+            f"*{result['title']}*\n"
+            f"🍽 Порций: {result.get('base_servings', '?')}\n"
+            f"🥕 Ингредиентов: {ing_count}\n\n"
+            f"Добавь к мероприятию в Mini App 👇",
+            parse_mode="Markdown",
+            reply_markup=open_app_kb(),
+        )
+    else:
+        await message.answer("❌ Не получилось распознать рецепт. Попробуй ещё раз.")
+
+
 # --- /sync_calendar ---
 
 async def cmd_sync_calendar(message: Message):
@@ -235,6 +279,7 @@ async def main():
     dp.message.register(cmd_start, CommandStart())
     dp.message.register(cmd_new_event, Command("new_event"))
     dp.message.register(cmd_import_recipe, Command("import_recipe"))
+    dp.message.register(cmd_import_text, Command("import_text"))
     dp.message.register(cmd_sync_calendar, Command("sync_calendar"))
 
     # FSM: new_event flow
@@ -242,6 +287,9 @@ async def main():
     dp.message.register(new_event_skip_date, NewEvent.date, Command("skip"))
     dp.message.register(new_event_date, NewEvent.date)
     dp.message.register(new_event_guests, NewEvent.guests)
+
+    # FSM: import_text
+    dp.message.register(import_text_receive, ImportText.waiting_for_text)
 
     log.info("Bot started (polling)...")
     await dp.start_polling(bot, skip_updates=True)

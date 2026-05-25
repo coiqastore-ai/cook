@@ -59,6 +59,8 @@ export const api = {
     list: () => req<Recipe[]>("GET", "/recipes/"),
     get: (id: number) => req<Recipe>("GET", `/recipes/${id}`),
     import: (url: string) => req<Recipe>("POST", "/recipes/import", { url }),
+    importText: (text: string, title?: string) =>
+      req<Recipe>("POST", "/recipes/import-text", { text, title }),
   },
 
   shopping: {

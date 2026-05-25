@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -9,6 +10,11 @@ from app.schemas.recipe import ImportRecipeRequest, RecipeOut
 from app.services import normalizer, recipe_parser
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
+
+
+class ImportTextRequest(BaseModel):
+    text: str
+    title: str | None = None
 
 
 @router.get("/", response_model=list[RecipeOut])
@@ -30,13 +36,8 @@ async def get_recipe(recipe_id: int, session: AsyncSession = Depends(get_session
     return recipe
 
 
-@router.post("/import", response_model=RecipeOut, status_code=201)
-async def import_recipe(body: ImportRecipeRequest, session: AsyncSession = Depends(get_session)):
-    try:
-        data = await recipe_parser.parse_recipe(body.url)
-    except Exception as e:
-        raise HTTPException(422, f"Failed to parse recipe: {e}")
-
+async def _save_parsed_recipe(data: dict, session: AsyncSession) -> Recipe:
+    """Persist parsed recipe + ingredients to DB."""
     recipe = Recipe(
         title=data["title"],
         source_url=data.get("source_url"),
@@ -48,32 +49,49 @@ async def import_recipe(body: ImportRecipeRequest, session: AsyncSession = Depen
     session.add(recipe)
     await session.flush()  # get recipe.id
 
-    # Parse and normalize ingredients
     structured = data.get("ingredients_structured") or []
     if not structured and data.get("ingredients_raw"):
         structured = await recipe_parser.parse_ingredients_text(data["ingredients_raw"])
 
     for ing_data in structured:
-        name = ing_data.get("name", "").strip()
+        name = (ing_data.get("name") or "").strip()
         if not name:
             continue
         qty = ing_data.get("quantity")
         unit = ing_data.get("unit")
         qty_float = float(qty) if qty is not None else None
         norm_g = await normalizer.normalize_ingredient(name, qty_float, unit)
-        ing = Ingredient(
+        session.add(Ingredient(
             recipe_id=recipe.id,
             name=name,
             quantity=qty_float,
             unit=unit,
             normalized_grams=norm_g,
-        )
-        session.add(ing)
+        ))
 
     await session.commit()
-    await session.refresh(recipe)
 
     result = await session.execute(
         select(Recipe).where(Recipe.id == recipe.id).options(selectinload(Recipe.ingredients))
     )
     return result.scalar_one()
+
+
+@router.post("/import", response_model=RecipeOut, status_code=201)
+async def import_recipe(body: ImportRecipeRequest, session: AsyncSession = Depends(get_session)):
+    try:
+        data = await recipe_parser.parse_recipe(body.url)
+    except Exception as e:
+        raise HTTPException(422, f"Failed to parse recipe: {e}")
+    return await _save_parsed_recipe(data, session)
+
+
+@router.post("/import-text", response_model=RecipeOut, status_code=201)
+async def import_recipe_from_text(body: ImportTextRequest, session: AsyncSession = Depends(get_session)):
+    if not body.text.strip():
+        raise HTTPException(422, "Empty text")
+    try:
+        data = await recipe_parser.parse_recipe_from_text(body.text, title_hint=body.title)
+    except Exception as e:
+        raise HTTPException(422, f"Failed to parse recipe: {e}")
+    return await _save_parsed_recipe(data, session)

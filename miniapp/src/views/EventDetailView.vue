@@ -9,7 +9,10 @@ const event = ref<Event | null>(null);
 const allRecipes = ref<Recipe[]>([]);
 const showImport = ref(false);
 const showLibrary = ref(false);
+const importMode = ref<"url" | "text">("url");
 const importUrl = ref("");
+const importText = ref("");
+const importTitle = ref("");
 const importing = ref(false);
 
 async function load() {
@@ -17,16 +20,26 @@ async function load() {
 }
 
 async function importRecipe() {
-  if (!importUrl.value.trim()) return;
   importing.value = true;
   try {
-    const recipe = await api.recipes.import(importUrl.value.trim());
+    let recipe;
+    if (importMode.value === "url") {
+      if (!importUrl.value.trim()) return;
+      recipe = await api.recipes.import(importUrl.value.trim());
+    } else {
+      if (!importText.value.trim()) return;
+      recipe = await api.recipes.importText(importText.value, importTitle.value || undefined);
+    }
     await api.events.addRecipe(Number(props.id), recipe.id);
     importUrl.value = "";
+    importText.value = "";
+    importTitle.value = "";
     showImport.value = false;
     await load();
   } catch {
-    alert("Не удалось импортировать рецепт. Проверьте ссылку.");
+    alert(importMode.value === "url"
+      ? "Не удалось импортировать рецепт. Проверьте ссылку."
+      : "Не удалось распознать рецепт из текста. Попробуйте по-другому.");
   } finally {
     importing.value = false;
   }
@@ -99,9 +112,31 @@ onMounted(load);
       </div>
     </div>
 
-    <!-- Import by URL -->
+    <!-- Import (URL or text) -->
     <div v-if="showImport" class="bg-white rounded-xl border border-gray-200 p-3 mb-3 space-y-2">
-      <input v-model="importUrl" placeholder="https://..." class="input" />
+      <!-- Mode tabs -->
+      <div class="flex gap-1 bg-gray-100 p-1 rounded-lg">
+        <button @click="importMode = 'url'"
+          class="flex-1 py-1.5 text-sm rounded-md transition-colors"
+          :class="importMode === 'url' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
+          🔗 По ссылке
+        </button>
+        <button @click="importMode = 'text'"
+          class="flex-1 py-1.5 text-sm rounded-md transition-colors"
+          :class="importMode === 'text' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'">
+          📝 Текстом
+        </button>
+      </div>
+
+      <input v-if="importMode === 'url'" v-model="importUrl" placeholder="https://..." class="input" />
+
+      <template v-else>
+        <input v-model="importTitle" placeholder="Название (опционально)" class="input" />
+        <textarea v-model="importText"
+          placeholder="Вставь рецепт текстом — ингредиенты + способ приготовления в любом формате..."
+          class="input h-32 resize-none" />
+      </template>
+
       <div class="flex gap-2">
         <button @click="importRecipe" :disabled="importing" class="btn-primary flex-1">
           {{ importing ? "Импортирую..." : "Импортировать" }}
