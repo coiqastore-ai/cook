@@ -18,7 +18,12 @@ function getTelegramUserId(): number | null {
 
 async function load() {
   loading.value = true;
-  try { events.value = await api.events.list(); } finally { loading.value = false; }
+  try {
+    const uid = getTelegramUserId();
+    events.value = await api.events.list(uid ?? undefined);
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function createEvent() {

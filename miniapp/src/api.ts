@@ -38,9 +38,16 @@ export interface Recipe {
 export interface EventRecipe {
   recipe_id: number; servings_multiplier: number; recipe: Recipe;
 }
+export interface Collaborator {
+  telegram_user_id: number;
+  name: string | null;
+  username: string | null;
+}
 export interface Event {
   id: number; title: string; date: string | null; guests_count: number; notes: string | null;
+  telegram_user_id: number | null;
   event_recipes: EventRecipe[];
+  collaborators: Collaborator[];
 }
 export interface ShoppingItem {
   id: number; event_id: number; ingredient_name: string;
@@ -55,7 +62,8 @@ export interface TimelineTask {
 
 export const api = {
   events: {
-    list: () => req<Event[]>("GET", "/events/"),
+    list: (telegramUserId?: number) =>
+      req<Event[]>("GET", telegramUserId ? `/events/?telegram_user_id=${telegramUserId}` : "/events/"),
     get: (id: number) => req<Event>("GET", `/events/${id}`),
     create: (data: { title: string; date?: string | null; guests_count?: number; notes?: string; telegram_user_id?: number }) =>
       req<Event>("POST", "/events/", data),
@@ -67,6 +75,8 @@ export const api = {
       req<Event>("PATCH", `/events/${eventId}/recipes/${recipeId}`, { servings_multiplier: multiplier }),
     removeRecipe: (eventId: number, recipeId: number) =>
       req<Event>("DELETE", `/events/${eventId}/recipes/${recipeId}`),
+    removeCollaborator: (eventId: number, telegramUserId: number) =>
+      req<Event>("DELETE", `/events/${eventId}/collaborators/${telegramUserId}`),
   },
 
   recipes: {

@@ -13,6 +13,20 @@ class EventRecipeOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CollaboratorOut(BaseModel):
+    telegram_user_id: int
+    name: str | None
+    username: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class AddCollaborator(BaseModel):
+    telegram_user_id: int
+    name: str | None = None
+    username: str | None = None
+
+
 class EventCreate(BaseModel):
     title: str
     date: datetime | None = None
@@ -34,7 +48,9 @@ class EventOut(BaseModel):
     date: datetime | None
     guests_count: int
     notes: str | None
+    telegram_user_id: int | None = None
     event_recipes: list[EventRecipeOut] = []
+    collaborators: list[CollaboratorOut] = []
 
     model_config = {"from_attributes": True}
 

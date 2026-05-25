@@ -23,3 +23,4 @@ class Event(Base):
     event_recipes: Mapped[list["EventRecipe"]] = relationship(back_populates="event", cascade="all, delete-orphan")
     shopping_items: Mapped[list["ShoppingItem"]] = relationship(back_populates="event", cascade="all, delete-orphan")
     timeline_tasks: Mapped[list["TimelineTask"]] = relationship(back_populates="event", cascade="all, delete-orphan")
+    collaborators: Mapped[list["EventCollaborator"]] = relationship(back_populates="event", cascade="all, delete-orphan")

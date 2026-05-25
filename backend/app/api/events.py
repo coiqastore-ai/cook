@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_session
-from app.models import Event, EventRecipe, Recipe
+from app.models import Event, EventCollaborator, EventRecipe, Recipe
 from app.schemas.event import (
+    AddCollaborator,
     AddRecipeToEvent,
+    CollaboratorOut,
     EventCreate,
     EventOut,
     EventUpdate,
@@ -20,7 +22,8 @@ from app.schemas.event import (
 router = APIRouter(prefix="/events", tags=["events"])
 
 _EVENT_LOAD = [
-    selectinload(Event.event_recipes).selectinload(EventRecipe.recipe).selectinload(Recipe.ingredients)
+    selectinload(Event.event_recipes).selectinload(EventRecipe.recipe).selectinload(Recipe.ingredients),
+    selectinload(Event.collaborators),
 ]
 
 
@@ -35,10 +38,24 @@ async def _get_event_or_404(event_id: int, session: AsyncSession) -> Event:
 
 
 @router.get("/", response_model=list[EventOut])
-async def list_events(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(Event).options(*_EVENT_LOAD).order_by(Event.date.asc().nulls_last())
-    )
+async def list_events(
+    telegram_user_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """List events. If telegram_user_id is provided, only return events the user owns
+    or is collaborator on. Otherwise return all (admin view)."""
+    from sqlalchemy import or_
+
+    query = select(Event).options(*_EVENT_LOAD).order_by(Event.date.asc().nulls_last())
+    if telegram_user_id is not None:
+        # Owned OR collaborator-on
+        collab_event_ids = select(EventCollaborator.event_id).where(
+            EventCollaborator.telegram_user_id == telegram_user_id
+        )
+        query = query.where(
+            or_(Event.telegram_user_id == telegram_user_id, Event.id.in_(collab_event_ids))
+        )
+    result = await session.execute(query)
     return result.scalars().all()
 
 
@@ -167,4 +184,53 @@ async def event_ical(event_id: int, session: AsyncSession = Depends(get_session)
         content=ics,
         media_type="text/calendar; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="event-{event.id}.ics"'},
+    )
+
+
+@router.post("/{event_id}/collaborators", response_model=EventOut, status_code=201)
+async def add_collaborator(
+    event_id: int, body: AddCollaborator, session: AsyncSession = Depends(get_session)
+):
+    await _get_event_or_404(event_id, session)
+    existing = await session.get(EventCollaborator, (event_id, body.telegram_user_id))
+    if existing:
+        # Update name/username if changed
+        if body.name:
+            existing.name = body.name
+        if body.username:
+            existing.username = body.username
+    else:
+        session.add(EventCollaborator(
+            event_id=event_id,
+            telegram_user_id=body.telegram_user_id,
+            name=body.name,
+            username=body.username,
+        ))
+    await session.commit()
+    return await _get_event_or_404(event_id, session)
+
+
+@router.delete("/{event_id}/collaborators/{telegram_user_id}", response_model=EventOut)
+async def remove_collaborator(
+    event_id: int, telegram_user_id: int, session: AsyncSession = Depends(get_session)
+):
+    collab = await session.get(EventCollaborator, (event_id, telegram_user_id))
+    if not collab:
+        raise HTTPException(404, "Collaborator not found")
+    await session.delete(collab)
+    await session.commit()
+    return await _get_event_or_404(event_id, session)
+
+
+@router.get("/{event_id}/menu.pdf")
+async def event_menu_pdf(event_id: int, session: AsyncSession = Depends(get_session)):
+    """Generate beautiful PDF menu for sharing with guests (no ingredients/grams)."""
+    from app.services.pdf_menu import render_menu_pdf
+
+    event = await _get_event_or_404(event_id, session)
+    pdf_bytes = render_menu_pdf(event)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="menu-{event.id}.pdf"'},
     )

@@ -20,6 +20,27 @@ const importImagePreview = ref<string | null>(null);
 const importing = ref(false);
 
 const icalUrl = computed(() => `${API_BASE.replace(/\/$/, "")}/events/${props.id}/ical`);
+const pdfUrl = computed(() => `${API_BASE.replace(/\/$/, "")}/events/${props.id}/menu.pdf`);
+
+const BOT_USERNAME = "reciptesbot";  // ⚠ change if bot username changes
+
+function shareWithFriend() {
+  const deepLink = `https://t.me/${BOT_USERNAME}?start=event_${props.id}`;
+  const title = encodeURIComponent(event.value?.title ?? "событию");
+  const url = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=Присоединяйся%20к%20${title}%20в%20Mealie`;
+  const tg = (window as any).Telegram?.WebApp;
+  if (tg && typeof tg.openTelegramLink === "function") {
+    tg.openTelegramLink(url);
+  } else {
+    window.open(url, "_blank");
+  }
+}
+
+async function removeCollaborator(uid: number) {
+  if (!confirm("Убрать друга из события?")) return;
+  await api.events.removeCollaborator(Number(props.id), uid);
+  await load();
+}
 
 function onFileSelected(e: globalThis.Event) {
   const f = (e.target as HTMLInputElement).files?.[0];
@@ -125,11 +146,37 @@ onMounted(load);
         ⏱ Таймлайн
       </button>
     </div>
-    <!-- Add to calendar -->
+    <!-- Add to calendar + PDF + Share -->
     <a v-if="event.date" :href="icalUrl"
-      class="block w-full mb-4 bg-purple-50 border border-purple-200 text-purple-700 rounded-xl py-3 text-sm font-medium text-center">
+      class="block w-full mb-2 bg-purple-50 border border-purple-200 text-purple-700 rounded-xl py-3 text-sm font-medium text-center">
       📅 Добавить в календарь (.ics)
     </a>
+    <div class="grid grid-cols-2 gap-2 mb-4">
+      <a :href="pdfUrl" target="_blank"
+        class="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl py-3 text-sm font-medium text-center">
+        📄 Меню (PDF)
+      </a>
+      <button @click="shareWithFriend"
+        class="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl py-3 text-sm font-medium">
+        👥 Пригласить друга
+      </button>
+    </div>
+
+    <!-- Collaborators -->
+    <div v-if="event.collaborators?.length" class="bg-white rounded-xl border border-gray-200 p-3 mb-4">
+      <p class="text-xs font-semibold text-gray-500 uppercase mb-2">Соавторы</p>
+      <div class="space-y-1.5">
+        <div v-for="c in event.collaborators" :key="c.telegram_user_id"
+          class="flex items-center justify-between text-sm">
+          <span class="text-gray-700">
+            {{ c.name || "Без имени" }}
+            <span v-if="c.username" class="text-gray-400">@{{ c.username }}</span>
+          </span>
+          <button @click="removeCollaborator(c.telegram_user_id)"
+            class="text-gray-400 hover:text-red-500 text-xs">✕</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Recipes section -->
     <div class="flex items-center justify-between mb-3">

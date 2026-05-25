@@ -99,6 +99,33 @@ async def api_post(path: str, data: dict) -> dict | None:
 
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
+
+    # Deep-link: /start event_<id> → join as collaborator
+    args = message.text.split(maxsplit=1) if message.text else []
+    if len(args) > 1 and args[1].startswith("event_"):
+        try:
+            event_id = int(args[1].removeprefix("event_"))
+        except ValueError:
+            event_id = None
+        if event_id and message.from_user:
+            user = message.from_user
+            payload = {
+                "telegram_user_id": user.id,
+                "name": (user.full_name or user.first_name or "")[:200],
+                "username": user.username,
+            }
+            ev = await api_post(f"/events/{event_id}/collaborators", payload)
+            if ev:
+                await message.answer(
+                    f"✅ Ты добавлен(а) в событие *{ev['title']}*!\n\n"
+                    f"Открой Mini App — там сможешь редактировать список рецептов и закупку 👇",
+                    parse_mode="Markdown",
+                    reply_markup=main_kb(),
+                )
+                return
+            await message.answer("❌ Не удалось присоединиться к событию (возможно оно удалено).", reply_markup=main_kb())
+            return
+
     await message.answer(
         "👋 Привет! Я Mealie Bot — помогаю планировать застолья.\n\n"
         "Что я умею:\n"
@@ -106,7 +133,8 @@ async def cmd_start(message: Message, state: FSMContext):
         "• Импортировать рецепты по ссылке, тексту или с фото\n"
         "• Собирать единый список закупки по событию\n"
         "• Делать таймлайн готовки\n"
-        "• Напоминать о событии за сутки\n\n"
+        "• Напоминать о событии за сутки\n"
+        "• Совместное редактирование с друзьями\n\n"
         "Выбери действие на клавиатуре снизу 👇",
         reply_markup=main_kb(),
     )

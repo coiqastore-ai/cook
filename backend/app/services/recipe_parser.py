@@ -1,7 +1,45 @@
+import json
+
 import httpx
 from recipe_scrapers import scrape_html, scrape_me
 
 from app.services import llm
+
+
+def _looks_russian(text: str) -> bool:
+    """Heuristic: more than 30% Cyrillic letters → consider it Russian."""
+    if not text:
+        return True
+    cyrillic = sum(1 for c in text if "а" <= c.lower() <= "я" or c.lower() == "ё")
+    letters = sum(1 for c in text if c.isalpha())
+    return letters == 0 or cyrillic / letters > 0.3
+
+
+async def _translate_recipe_to_russian(data: dict) -> dict:
+    """Translate recipe-scrapers result to Russian if it's not already."""
+    title = data.get("title") or ""
+    raw_ingredients = " ".join(data.get("ingredients_raw") or [])
+    if _looks_russian(title) and _looks_russian(raw_ingredients):
+        return data
+
+    payload = {
+        "title": data.get("title", ""),
+        "instructions": data.get("instructions", []),
+        "ingredients_raw": data.get("ingredients_raw", []),
+    }
+    prompt = f"""Translate this recipe data from any language to RUSSIAN. Return the same JSON structure with all text translated.
+Keep ingredient quantities/numbers intact within the strings.
+
+{json.dumps(payload, ensure_ascii=False)}"""
+    try:
+        translated = await llm.smart_json(prompt)
+        if isinstance(translated, dict):
+            data["title"] = translated.get("title") or data["title"]
+            data["instructions"] = translated.get("instructions") or data["instructions"]
+            data["ingredients_raw"] = translated.get("ingredients_raw") or data["ingredients_raw"]
+    except Exception:
+        pass  # if translation fails, return original
+    return data
 
 
 async def parse_recipe(url: str) -> dict:
@@ -11,7 +49,7 @@ async def parse_recipe(url: str) -> dict:
         scraper = scrape_me(url, wild_mode=True)
         ingredients_raw = scraper.ingredients()
         instructions_raw = scraper.instructions_list() or [scraper.instructions()]
-        return {
+        data = {
             "title": scraper.title() or "Без названия",
             "source_url": url,
             "base_servings": _int(scraper.yields()) or 4,
@@ -20,6 +58,8 @@ async def parse_recipe(url: str) -> dict:
             "instructions": [s for s in instructions_raw if s],
             "ingredients_raw": ingredients_raw,
         }
+        # Translate if the source was in another language
+        return await _translate_recipe_to_russian(data)
     except Exception:
         pass
 
@@ -41,6 +81,8 @@ async def parse_recipe(url: str) -> dict:
   "instructions": ["step1", "step2", ...],
   "ingredients": [{{"name": "string", "quantity": number or null, "unit": "string or null"}}]
 }}
+
+IMPORTANT: Always return all text in RUSSIAN. Translate the title, ingredient names, units, and instructions to Russian if the source is in another language. Keep numeric values and quantities unchanged.
 
 HTML:
 {html_trimmed}"""
@@ -83,7 +125,8 @@ Return JSON with exactly these fields:
   "ingredients": [{"name": "string", "quantity": number or null, "unit": "string or null"}]
 }
 
-If the text is in Russian, keep ingredient names in Russian. If you can't read something, omit it rather than guess."""
+IMPORTANT: Always return all text in RUSSIAN. If the recipe is in another language (English, Italian, French, etc.), translate the title, ingredient names, units, and instructions to Russian. Keep numbers/quantities unchanged.
+If you can't read something, omit it rather than guess."""
 
     data = await llm.vision_json(prompt, image_b64)
     if not isinstance(data, dict):
@@ -110,6 +153,8 @@ async def parse_recipe_from_text(text: str, title_hint: str | None = None) -> di
   "instructions": ["step1", "step2", ...],
   "ingredients": [{{"name": "string", "quantity": number or null, "unit": "string or null"}}]
 }}
+
+IMPORTANT: Always return all text in RUSSIAN. Translate the title, ingredient names, units, and instructions to Russian if the source is in another language. Keep numeric values and quantities unchanged.
 
 Title hint (if provided): {title_hint or "—"}
 
