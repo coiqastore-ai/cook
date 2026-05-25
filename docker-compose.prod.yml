@@ -39,8 +39,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=n8n_default"
-      # API на coiqa.ru/api/*
-      - "traefik.http.routers.mealie-api.rule=Host(`coiqa.ru`) && PathPrefix(`/api`)"
+      # API на cook.coiqa.ru/api/*
+      - "traefik.http.routers.mealie-api.rule=Host(`cook.coiqa.ru`) && PathPrefix(`/api`)"
       - "traefik.http.routers.mealie-api.entrypoints=websecure"
       - "traefik.http.routers.mealie-api.tls.certresolver=mytlschallenge"
       # Снимаем префикс /api перед проксированием в FastAPI
@@ -73,8 +73,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=n8n_default"
-      # Mini App на coiqa.ru (всё кроме /api)
-      - "traefik.http.routers.mealie-app.rule=Host(`coiqa.ru`)"
+      # Mini App на cook.coiqa.ru (всё кроме /api)
+      - "traefik.http.routers.mealie-app.rule=Host(`cook.coiqa.ru`)"
       - "traefik.http.routers.mealie-app.entrypoints=websecure"
       - "traefik.http.routers.mealie-app.tls.certresolver=mytlschallenge"
       - "traefik.http.routers.mealie-app.priority=1"
