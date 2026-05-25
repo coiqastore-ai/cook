@@ -16,6 +16,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
+    MenuButtonWebApp,
     Message,
     PhotoSize,
     ReplyKeyboardMarkup,
@@ -434,9 +435,24 @@ async def photo_hint(message: Message):
 # Entry point
 # ---------------------------------------------------------------------------
 
+async def _configure_bot_menu(bot: Bot):
+    """Force-set the bot's Menu Button to our Mini App URL.
+    Overrides whatever was set via BotFather — guarantees correctness."""
+    try:
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+            text="Открыть Mealie",
+            web_app=WebAppInfo(url=settings.miniapp_url),
+        ))
+        log.info("Menu button set to WebApp URL: %s", settings.miniapp_url)
+    except Exception as e:
+        log.warning("Failed to set menu button: %s", e)
+
+
 async def main():
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
+
+    await _configure_bot_menu(bot)
 
     # Commands
     dp.message.register(cmd_start, CommandStart())
