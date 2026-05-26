@@ -2,13 +2,9 @@
 import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { api, fileToBase64, type Event, type Recipe } from "../api";
+import { getTelegramUserId } from "../composables/useTelegramUser";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-
-function getTelegramUserId(): number | null {
-  const tg = (window as any).Telegram?.WebApp;
-  return tg?.initDataUnsafe?.user?.id ?? null;
-}
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();

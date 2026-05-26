@@ -2,10 +2,7 @@
 import { ref, onMounted } from "vue";
 import { api, fileToBase64, type Recipe, type Ingredient, type Event } from "../api";
 
-function getTelegramUserId(): number | null {
-  const tg = (window as any).Telegram?.WebApp;
-  return tg?.initDataUnsafe?.user?.id ?? null;
-}
+import { getTelegramUserId, telegramDebugInfo } from "../composables/useTelegramUser";
 
 const recipes = ref<Recipe[]>([]);
 const loading = ref(false);
@@ -50,6 +47,7 @@ async function attachToEvent(eventId: number, recipeId: number) {
 }
 
 const noTgUser = ref(false);
+const debugInfo = ref(telegramDebugInfo());
 
 async function load() {
   loading.value = true;
@@ -240,6 +238,10 @@ onMounted(load);
     <div v-else-if="noTgUser" class="text-center py-12 text-gray-400">
       <p class="text-4xl mb-2">🔒</p>
       <p>Открой это приложение через Telegram-бот <strong>@reciptesbot</strong></p>
+      <details class="mt-6 text-left text-xs mx-auto max-w-xs">
+        <summary class="cursor-pointer text-gray-500">Debug info</summary>
+        <pre class="bg-gray-100 p-2 rounded mt-2 overflow-auto text-xs whitespace-pre-wrap">{{ debugInfo }}</pre>
+      </details>
     </div>
 
     <div v-else-if="!recipes.length" class="text-center py-12 text-gray-400">

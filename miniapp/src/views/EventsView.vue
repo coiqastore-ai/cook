@@ -10,13 +10,10 @@ const showForm = ref(false);
 
 const form = ref({ title: "", date: "", guests_count: 1, notes: "" });
 
-// Telegram WebApp user id (if launched from inside Telegram)
-function getTelegramUserId(): number | null {
-  const tg = (window as any).Telegram?.WebApp;
-  return tg?.initDataUnsafe?.user?.id ?? null;
-}
+import { getTelegramUserId, telegramDebugInfo } from "../composables/useTelegramUser";
 
 const noTgUser = ref(false);
+const debugInfo = ref(telegramDebugInfo());
 
 async function load() {
   loading.value = true;
@@ -86,6 +83,10 @@ onMounted(() => { load(); });
     <div v-else-if="noTgUser" class="text-center py-12 text-gray-400">
       <p class="text-4xl mb-2">🔒</p>
       <p>Открой это приложение через Telegram-бот <strong>@reciptesbot</strong></p>
+      <details class="mt-6 text-left text-xs mx-auto max-w-xs">
+        <summary class="cursor-pointer text-gray-500">Debug info</summary>
+        <pre class="bg-gray-100 p-2 rounded mt-2 overflow-auto text-xs whitespace-pre-wrap">{{ debugInfo }}</pre>
+      </details>
     </div>
 
     <!-- Empty -->
