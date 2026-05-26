@@ -27,6 +27,12 @@ class ImportImageRequest(BaseModel):
     telegram_user_id: int | None = None
 
 
+class ImportAudioRequest(BaseModel):
+    audio_base64: str
+    audio_format: str = "ogg"  # ogg/wav/mp3/aac/flac
+    telegram_user_id: int | None = None
+
+
 class IngredientCreate(BaseModel):
     name: str
     quantity: float | None = None
@@ -155,6 +161,17 @@ async def import_recipe_from_image(body: ImportImageRequest, session: AsyncSessi
         data = await recipe_parser.parse_recipe_from_images(images, title_hint=body.title)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe from image: {e}")
+    return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
+
+
+@router.post("/import-audio", response_model=RecipeOut, status_code=201)
+async def import_recipe_from_audio(body: ImportAudioRequest, session: AsyncSession = Depends(get_session)):
+    if not body.audio_base64.strip():
+        raise HTTPException(422, "No audio data provided")
+    try:
+        data = await recipe_parser.parse_recipe_from_audio(body.audio_base64, audio_format=body.audio_format)
+    except Exception as e:
+        raise HTTPException(422, f"Failed to parse recipe from audio: {e}")
     return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
 
 

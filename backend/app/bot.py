@@ -540,50 +540,33 @@ async def cb_import_photo(query: CallbackQuery):
         )
 
 
-# --- Voice recognition handler (Whisper) ---
+# --- Voice recognition handler (Gemini audio via OpenRouter) ---
 
 async def handle_voice(message: Message, bot: Bot):
-    """Auto-transcribe voice/audio via Whisper, then parse the transcript as recipe."""
+    """Send voice/audio to Gemini (via OpenRouter) — it transcribes + parses recipe in one call."""
     file_obj = message.voice or message.audio
     if not file_obj:
         return
 
-    wait = await message.answer("🎤 Слушаю и расшифровываю через Whisper, подожди 10-20 сек...")
+    wait = await message.answer("🎤 Слушаю и распознаю рецепт через LLM, подожди 15-25 сек...")
 
     file = await bot.get_file(file_obj.file_id)
     buf = BytesIO()
     await bot.download(file, destination=buf)
+    audio_b64 = base64.b64encode(buf.getvalue()).decode()
 
-    # Transcribe
-    try:
-        from app.services.llm import transcribe_audio
-        transcript = await transcribe_audio(buf.getvalue(), filename="voice.ogg")
-    except RuntimeError as e:
-        try: await wait.delete()
-        except Exception: pass
-        await message.answer(
-            "❌ Голосовой ввод не настроен (нет `OPENAI_API_KEY`). Попроси администратора.",
-            parse_mode="Markdown",
-            reply_markup=main_kb(),
-        )
-        log.warning("transcribe failed: %s", e)
-        return
-    except Exception as e:
-        try: await wait.delete()
-        except Exception: pass
-        await message.answer(f"❌ Не получилось расшифровать: {e}", reply_markup=main_kb())
-        return
+    # Telegram voice messages are OGG/Opus. message.audio could be mp3/m4a/other.
+    audio_format = "ogg"
+    if message.audio and message.audio.mime_type:
+        mt = message.audio.mime_type.lower()
+        for fmt in ("mp3", "wav", "flac", "aac", "ogg", "m4a"):
+            if fmt in mt:
+                audio_format = "mp3" if fmt == "m4a" else fmt
+                break
 
-    if not transcript:
-        try: await wait.delete()
-        except Exception: pass
-        await message.answer("❌ Не удалось распознать речь. Попробуй ещё раз.", reply_markup=main_kb())
-        return
-
-    # Parse transcript as recipe text
-    result = await api_post("/recipes/import-text", {
-        "text": transcript,
-        "title": None,
+    result = await api_post("/recipes/import-audio", {
+        "audio_base64": audio_b64,
+        "audio_format": audio_format,
         "telegram_user_id": message.from_user.id if message.from_user else None,
     })
     try: await wait.delete()
@@ -602,8 +585,8 @@ async def handle_voice(message: Message, bot: Bot):
         )
     else:
         await message.answer(
-            f"⚠️ Расшифровал голос: «{transcript[:200]}»\n\n"
-            f"Но не смог распознать как рецепт. Попробуй надиктовать чётче с ингредиентами и количеством.",
+            "❌ Не получилось распознать рецепт с голоса. "
+            "Попробуй говорить чётче, перечисляя ингредиенты и количество.",
             reply_markup=main_kb(),
         )
 

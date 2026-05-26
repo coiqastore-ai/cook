@@ -165,6 +165,41 @@ async def parse_recipe_from_image(image_b64: str, title_hint: str | None = None)
     return await parse_recipe_from_images([image_b64], title_hint=title_hint)
 
 
+async def parse_recipe_from_audio(audio_b64: str, audio_format: str = "ogg") -> dict:
+    """Transcribe a voice message + extract recipe data in ONE LLM call via Gemini audio input."""
+    prompt = """This audio is someone dictating a recipe. Transcribe what they say and extract recipe data.
+
+Return JSON with exactly these fields:
+{
+  "title": "string (give it a sensible name from context if not explicitly named)",
+  "servings": number (default 4 if unclear),
+  "cook_time_min": number or null,
+  "prep_time_min": number or null,
+  "instructions": ["step1", "step2", ...] (if mentioned, else empty array),
+  "ingredients": [{"name": "string", "quantity": number or null, "unit": "string or null"}]
+}
+
+IMPORTANT:
+- Always return all text in RUSSIAN.
+- CONVERT imperial units to metric (lb→kg, oz→g, cup→ml, etc.).
+- Read EVERY ingredient mentioned — including small items like salt, pepper, oil.
+- For amounts like 'по вкусу' / 'щепотка' — quantity: null, unit: "по вкусу".
+- If quantity isn't clear, leave it null rather than guess."""
+
+    data = await llm.audio_json(prompt, audio_b64, audio_format=audio_format)
+    if not isinstance(data, dict):
+        raise ValueError("Audio LLM returned non-object response")
+    return {
+        "title": data.get("title") or "Рецепт с голоса",
+        "source_url": None,
+        "base_servings": int(data.get("servings") or 4),
+        "cook_time_min": data.get("cook_time_min"),
+        "prep_time_min": data.get("prep_time_min"),
+        "instructions": data.get("instructions", []),
+        "ingredients_structured": data.get("ingredients", []),
+    }
+
+
 def _clean_pinterest_noise(text: str) -> str:
     """Strip obvious Pinterest/Instagram preview blocks from copied text."""
     lines = text.splitlines()

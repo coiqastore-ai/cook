@@ -1,12 +1,10 @@
 import json
-from io import BytesIO
 
 from openai import AsyncOpenAI
 
 from app.config import settings
 
 _client: AsyncOpenAI | None = None
-_whisper_client: AsyncOpenAI | None = None
 
 _JSON_SYSTEM = "You are a helpful assistant. Always respond with valid JSON only, no markdown fences."
 
@@ -99,28 +97,24 @@ async def chat_json(prompt: str) -> dict | list:
     return await fast_json(prompt)
 
 
-# --- Whisper transcription (OpenAI directly, not OpenRouter) ---
+# --- Audio input through OpenRouter (Gemini 2.5 Flash supports audio) ---
 
-def get_whisper_client() -> AsyncOpenAI | None:
-    global _whisper_client
-    if not settings.openai_api_key:
-        return None
-    if _whisper_client is None:
-        _whisper_client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _whisper_client
-
-
-async def transcribe_audio(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
-    """Transcribe voice/audio to text via OpenAI Whisper.
-    Returns empty string if OPENAI_API_KEY not configured."""
-    client = get_whisper_client()
-    if not client:
-        raise RuntimeError("OPENAI_API_KEY not configured")
-    audio_file = BytesIO(audio_bytes)
-    audio_file.name = filename
-    response = await client.audio.transcriptions.create(
-        model="whisper-1",
-        file=audio_file,
-        language="ru",
+async def audio_chat(prompt: str, audio_b64: str, audio_format: str = "ogg") -> str:
+    """Send an audio clip + text prompt to Gemini via OpenRouter, return its reply.
+    Gemini accepts: ogg, wav, mp3, aiff, aac, flac. Telegram voice is ogg/opus — works."""
+    response = await get_client().chat.completions.create(
+        model=settings.openrouter_model_smart,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "input_audio", "input_audio": {"data": audio_b64, "format": audio_format}},
+            ],
+        }],
+        temperature=0,
     )
-    return (response.text or "").strip()
+    return response.choices[0].message.content or ""
+
+
+async def audio_json(prompt: str, audio_b64: str, audio_format: str = "ogg") -> dict | list:
+    return _parse_json(await audio_chat(prompt, audio_b64, audio_format))

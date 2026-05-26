@@ -9,11 +9,8 @@ class Settings(BaseSettings):
     miniapp_url: str = "http://localhost:5173"
     openrouter_api_key: str = ""
     openrouter_model_fast: str = "deepseek/deepseek-chat"            # normalizer, aggregator
-    openrouter_model_smart: str = "google/gemini-2.5-flash"          # recipe parser, timeline
+    openrouter_model_smart: str = "google/gemini-2.5-flash"          # recipe parser, timeline + audio
     openrouter_model_vision: str = "qwen/qwen-2.5-vl-72b-instruct"   # photo/screenshot recognition
-
-    # OpenAI directly (Whisper isn't on OpenRouter)
-    openai_api_key: str = ""
 
     google_client_id: str = ""
     google_client_secret: str = ""
