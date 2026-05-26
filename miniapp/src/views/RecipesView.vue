@@ -177,6 +177,26 @@ onMounted(load);
 
 <template>
   <div class="p-4">
+    <!-- Gate screen: only show when not opened via Telegram -->
+    <div v-if="noTgUser" class="text-center py-12 px-4">
+      <p class="text-5xl mb-4">🌳</p>
+      <h2 class="text-xl font-semibold text-gray-800 mb-2">Поляна</h2>
+      <p class="text-sm text-gray-500 mb-6">
+        Это приложение работает внутри Telegram.<br>
+        Открой через бота, чтобы войти.
+      </p>
+      <a href="https://t.me/reciptesbot"
+        class="inline-block bg-green-600 text-white py-3 px-8 rounded-xl font-medium">
+        📲 Открыть в Telegram
+      </a>
+      <details class="mt-8 text-left text-xs mx-auto max-w-xs">
+        <summary class="cursor-pointer text-gray-400">Debug info</summary>
+        <pre class="bg-gray-100 p-2 rounded mt-2 overflow-auto text-xs whitespace-pre-wrap">{{ debugInfo }}</pre>
+      </details>
+    </div>
+
+    <!-- Normal flow only when authenticated -->
+    <template v-else>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-xl font-semibold text-gray-800">Рецепты</h1>
       <button @click="showImport = !showImport"
@@ -234,15 +254,6 @@ onMounted(load);
     </div>
 
     <div v-if="loading" class="text-center py-8 text-gray-400">Загрузка...</div>
-
-    <div v-else-if="noTgUser" class="text-center py-12 text-gray-400">
-      <p class="text-4xl mb-2">🔒</p>
-      <p>Открой это приложение через Telegram-бот <strong>@reciptesbot</strong></p>
-      <details class="mt-6 text-left text-xs mx-auto max-w-xs">
-        <summary class="cursor-pointer text-gray-500">Debug info</summary>
-        <pre class="bg-gray-100 p-2 rounded mt-2 overflow-auto text-xs whitespace-pre-wrap">{{ debugInfo }}</pre>
-      </details>
-    </div>
 
     <div v-else-if="!recipes.length" class="text-center py-12 text-gray-400">
       <p class="text-4xl mb-2">📖</p>
@@ -356,6 +367,7 @@ onMounted(load);
           class="w-full mt-3 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Отмена</button>
       </div>
     </div>
+    </template>
   </div>
 </template>
 

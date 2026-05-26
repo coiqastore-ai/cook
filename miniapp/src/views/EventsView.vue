@@ -32,17 +32,24 @@ async function load() {
 }
 
 async function createEvent() {
-  if (!form.value.title.trim()) return;
-  await api.events.create({
-    title: form.value.title,
-    date: form.value.date || null,
-    guests_count: form.value.guests_count,
-    notes: form.value.notes || undefined,
-    telegram_user_id: getTelegramUserId() ?? undefined,
-  });
-  showForm.value = false;
-  form.value = { title: "", date: "", guests_count: 1, notes: "" };
-  await load();
+  if (!form.value.title.trim()) {
+    alert("Введи название события");
+    return;
+  }
+  try {
+    await api.events.create({
+      title: form.value.title,
+      date: form.value.date || null,
+      guests_count: form.value.guests_count,
+      notes: form.value.notes || undefined,
+      telegram_user_id: getTelegramUserId() ?? undefined,
+    });
+    showForm.value = false;
+    form.value = { title: "", date: "", guests_count: 1, notes: "" };
+    await load();
+  } catch (e) {
+    alert("Не получилось создать событие: " + (e instanceof Error ? e.message : e));
+  }
 }
 
 function formatDate(d: string | null) {
@@ -55,61 +62,72 @@ onMounted(() => { load(); });
 
 <template>
   <div class="p-4">
-    <div class="flex items-center justify-between mb-4">
-      <h1 class="text-xl font-semibold text-gray-800">Мои события</h1>
-      <button @click="showForm = !showForm"
-        class="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium">
-        + Создать
-      </button>
-    </div>
-
-    <!-- Create event form -->
-    <div v-if="showForm" class="bg-white rounded-xl border border-gray-200 p-4 mb-4 space-y-3">
-      <h2 class="font-medium text-gray-800">Новое событие</h2>
-      <input v-model="form.title" placeholder="Название" class="input" />
-      <input v-model="form.date" type="datetime-local" class="input" />
-      <input v-model.number="form.guests_count" type="number" min="1" placeholder="Гостей" class="input" />
-      <textarea v-model="form.notes" placeholder="Заметки (необязательно)" class="input h-16 resize-none" />
-      <div class="flex gap-2">
-        <button @click="createEvent" class="btn-primary flex-1">Создать</button>
-        <button @click="showForm = false" class="btn-ghost flex-1">Отмена</button>
-      </div>
-    </div>
-
-    <!-- Loading -->
-    <div v-if="loading" class="text-center py-8 text-gray-500">Загрузка...</div>
-
-    <!-- Not opened via Telegram -->
-    <div v-else-if="noTgUser" class="text-center py-12 text-gray-400">
-      <p class="text-4xl mb-2">🔒</p>
-      <p>Открой это приложение через Telegram-бот <strong>@reciptesbot</strong></p>
-      <details class="mt-6 text-left text-xs mx-auto max-w-xs">
-        <summary class="cursor-pointer text-gray-500">Debug info</summary>
+    <!-- Gate screen: only show this when not opened via Telegram -->
+    <div v-if="noTgUser" class="text-center py-12 px-4">
+      <p class="text-5xl mb-4">🌳</p>
+      <h2 class="text-xl font-semibold text-gray-800 mb-2">Поляна</h2>
+      <p class="text-sm text-gray-500 mb-6">
+        Это приложение работает внутри Telegram.<br>
+        Открой через бота, чтобы войти.
+      </p>
+      <a href="https://t.me/reciptesbot"
+        class="inline-block bg-green-600 text-white py-3 px-8 rounded-xl font-medium">
+        📲 Открыть в Telegram
+      </a>
+      <details class="mt-8 text-left text-xs mx-auto max-w-xs">
+        <summary class="cursor-pointer text-gray-400">Debug info</summary>
         <pre class="bg-gray-100 p-2 rounded mt-2 overflow-auto text-xs whitespace-pre-wrap">{{ debugInfo }}</pre>
       </details>
     </div>
 
-    <!-- Empty -->
-    <div v-else-if="!events.length" class="text-center py-12 text-gray-400">
-      <p class="text-4xl mb-2">🎉</p>
-      <p>Событий пока нет. Создай первое!</p>
-    </div>
+    <!-- Normal flow (only when authenticated) -->
+    <template v-else>
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-xl font-semibold text-gray-800">Мои события</h1>
+        <button @click="showForm = !showForm"
+          class="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium">
+          + Создать
+        </button>
+      </div>
 
-    <!-- List -->
-    <div v-else class="space-y-3">
-      <div v-for="event in events" :key="event.id"
-        @click="router.push(`/events/${event.id}`)"
-        class="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer hover:border-green-300 transition-colors">
-        <div class="flex justify-between items-start">
-          <h3 class="font-medium text-gray-800">{{ event.title }}</h3>
-          <span class="text-xs text-gray-400">{{ event.event_recipes.length }} рецептов</span>
-        </div>
-        <div class="mt-1 text-sm text-gray-500 flex gap-3">
-          <span v-if="event.date">📅 {{ formatDate(event.date) }}</span>
-          <span>👥 {{ event.guests_count }} чел.</span>
+      <!-- Create event form -->
+      <div v-if="showForm" class="bg-white rounded-xl border border-gray-200 p-4 mb-4 space-y-3">
+        <h2 class="font-medium text-gray-800">Новое событие</h2>
+        <input v-model="form.title" placeholder="Название" class="input" />
+        <input v-model="form.date" type="datetime-local" class="input" />
+        <input v-model.number="form.guests_count" type="number" min="1" placeholder="Гостей" class="input" />
+        <textarea v-model="form.notes" placeholder="Заметки (необязательно)" class="input h-16 resize-none" />
+        <div class="flex gap-2">
+          <button @click="createEvent" class="btn-primary flex-1">Создать</button>
+          <button @click="showForm = false" class="btn-ghost flex-1">Отмена</button>
         </div>
       </div>
-    </div>
+
+      <!-- Loading -->
+      <div v-if="loading" class="text-center py-8 text-gray-500">Загрузка...</div>
+
+      <!-- Empty -->
+      <div v-else-if="!events.length" class="text-center py-12 text-gray-400">
+        <p class="text-4xl mb-2">🎉</p>
+        <p>Событий пока нет. Создай первое!</p>
+      </div>
+
+      <!-- List -->
+      <div v-else class="space-y-3">
+        <div v-for="event in events" :key="event.id"
+          @click="router.push(`/events/${event.id}`)"
+          class="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer hover:border-green-300 transition-colors">
+          <div class="flex justify-between items-start">
+            <h3 class="font-medium text-gray-800">{{ event.title }}</h3>
+            <span class="text-xs text-gray-400">{{ event.event_recipes.length }} рецептов</span>
+          </div>
+          <div class="mt-1 text-sm text-gray-500 flex gap-3">
+            <span v-if="event.date">📅 {{ formatDate(event.date) }}</span>
+            <span>👥 {{ event.guests_count }} чел.</span>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
