@@ -68,21 +68,22 @@ def validate_init_data(init_data: str, bot_token: str, max_age_sec: int = _INIT_
 async def get_current_user_id(
     x_telegram_init_data: str | None = Header(default=None, alias="X-Telegram-Init-Data"),
     x_internal_api_key: str | None = Header(default=None, alias="X-Internal-API-Key"),
-    telegram_user_id: int | None = Query(default=None),
+    auth_uid: int | None = Query(default=None),
 ) -> int:
     """FastAPI dependency. Returns authenticated Telegram user_id.
 
     - Mini App: must send X-Telegram-Init-Data header (verified via HMAC).
-    - Internal bot calls: must send X-Internal-API-Key header + provide user_id via query/body.
+    - Internal bot calls: must send X-Internal-API-Key header + provide user_id via ?auth_uid=.
+
+    Note: query param is named `auth_uid` (not `telegram_user_id`) to avoid colliding
+    with `{telegram_user_id}` path params used in some routes.
     """
-    # Internal bot path — trusted via shared secret
     if settings.internal_api_key and x_internal_api_key:
         if hmac.compare_digest(x_internal_api_key, settings.internal_api_key):
-            if telegram_user_id is None:
-                raise HTTPException(400, "telegram_user_id query param required for internal calls")
-            return telegram_user_id
+            if auth_uid is None:
+                raise HTTPException(400, "auth_uid query param required for internal calls")
+            return auth_uid
 
-    # External path — verify initData
     if x_telegram_init_data:
         user = validate_init_data(x_telegram_init_data, settings.bot_token)
         if user:
@@ -95,11 +96,9 @@ async def get_current_user_id(
 async def get_current_user_id_optional(
     x_telegram_init_data: str | None = Header(default=None, alias="X-Telegram-Init-Data"),
     x_internal_api_key: str | None = Header(default=None, alias="X-Internal-API-Key"),
-    telegram_user_id: int | None = Query(default=None),
+    auth_uid: int | None = Query(default=None),
 ) -> int | None:
-    """Same as get_current_user_id but returns None instead of raising — for endpoints
-    that have public/anonymous fallback (e.g. share-card preview)."""
     try:
-        return await get_current_user_id(x_telegram_init_data, x_internal_api_key, telegram_user_id)
+        return await get_current_user_id(x_telegram_init_data, x_internal_api_key, auth_uid)
     except HTTPException:
         return None

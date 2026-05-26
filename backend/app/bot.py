@@ -107,12 +107,13 @@ def _internal_headers(user_id: int | None = None) -> dict[str, str]:
 
 
 async def api_post(path: str, data: dict, timeout: float = 180) -> dict | None:
-    """POST as internal bot service. If `telegram_user_id` is in data, also pass it as query."""
+    """POST as internal bot service. If `telegram_user_id` is in data, also pass it as ?auth_uid=
+    (FastAPI auth dependency reads it)."""
     headers = _internal_headers()
-    # Some endpoints expect user_id as a query param (auth dep reads it)
     user_id = data.get("telegram_user_id")
-    if user_id is not None and "?" not in path:
-        path = f"{path}?telegram_user_id={user_id}"
+    if user_id is not None:
+        sep = "&" if "?" in path else "?"
+        path = f"{path}{sep}auth_uid={user_id}"
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
