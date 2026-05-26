@@ -89,8 +89,24 @@ HTML:
 {html_trimmed}"""
 
     data = await llm.smart_json(prompt)
+    ingredients = data.get("ingredients") or []
+    title = (data.get("title") or "").strip()
+
+    # Guard: if LLM couldn't extract anything meaningful, don't save a junk recipe.
+    # Likely a JS-rendered SPA (Дзен, Pinterest, Instagram, рекламные блоги).
+    if not title or title.lower() in ("без названия", "название не найдено", "recipe title not found", "untitled"):
+        raise ValueError(
+            "На странице не нашлось рецепта (вероятно сайт защищён JS-рендерингом). "
+            "Попробуй пришли скриншот страницы или скопируй текст рецепта."
+        )
+    if len(ingredients) < 2:
+        raise ValueError(
+            "Удалось найти заголовок, но не получилось извлечь ингредиенты. "
+            "Попробуй пришли скриншот страницы или скопируй текст рецепта."
+        )
+
     return {
-        "title": data.get("title", "Без названия"),
+        "title": title,
         "source_url": url,
         "base_servings": int(data.get("servings") or 4),
         "cook_time_min": data.get("cook_time_min"),
@@ -98,9 +114,9 @@ HTML:
         "instructions": data.get("instructions", []),
         "ingredients_raw": [
             f"{i.get('quantity', '')} {i.get('unit', '')} {i.get('name', '')}".strip()
-            for i in data.get("ingredients", [])
+            for i in ingredients
         ],
-        "ingredients_structured": data.get("ingredients", []),
+        "ingredients_structured": ingredients,
     }
 
 
