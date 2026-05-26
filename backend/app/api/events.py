@@ -153,13 +153,13 @@ async def event_ical(event_id: int, session: AsyncSession = Depends(get_session)
         description.append(f"Гостей: {event.guests_count}")
     if event.notes:
         description.append(event.notes)
-    description.append("Открыть в Mealie: https://cook.coiqa.ru")
+    description.append("Открыть в Поляне: https://cook.coiqa.ru")
     desc_text = "\\n".join(description)
 
     ics = (
         "BEGIN:VCALENDAR\r\n"
         "VERSION:2.0\r\n"
-        "PRODID:-//Mealie Bot//RU\r\n"
+        "PRODID:-//Polyana Bot//RU\r\n"
         "CALSCALE:GREGORIAN\r\n"
         "METHOD:PUBLISH\r\n"
         "BEGIN:VEVENT\r\n"

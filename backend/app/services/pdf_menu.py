@@ -163,7 +163,7 @@ body {{
         </div>
     </div>
 
-    <div class="footer">Mealie · cook.coiqa.ru</div>
+    <div class="footer">ПОЛЯНА · cook.coiqa.ru</div>
 </body>
 </html>"""
 

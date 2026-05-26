@@ -3,6 +3,9 @@ import "./style.css";
 import App from "./App.vue";
 import router from "./router";
 
+// Set page title
+document.title = "Поляна";
+
 // Initialize Telegram WebApp — expand to full height and signal ready
 const tg = (window as any).Telegram?.WebApp;
 if (tg) {

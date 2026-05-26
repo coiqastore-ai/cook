@@ -1,10 +1,12 @@
 import json
+from io import BytesIO
 
 from openai import AsyncOpenAI
 
 from app.config import settings
 
 _client: AsyncOpenAI | None = None
+_whisper_client: AsyncOpenAI | None = None
 
 _JSON_SYSTEM = "You are a helpful assistant. Always respond with valid JSON only, no markdown fences."
 
@@ -95,3 +97,30 @@ async def vision_json(prompt: str, image_b64: str) -> dict | list:
 # Backward-compat alias
 async def chat_json(prompt: str) -> dict | list:
     return await fast_json(prompt)
+
+
+# --- Whisper transcription (OpenAI directly, not OpenRouter) ---
+
+def get_whisper_client() -> AsyncOpenAI | None:
+    global _whisper_client
+    if not settings.openai_api_key:
+        return None
+    if _whisper_client is None:
+        _whisper_client = AsyncOpenAI(api_key=settings.openai_api_key)
+    return _whisper_client
+
+
+async def transcribe_audio(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
+    """Transcribe voice/audio to text via OpenAI Whisper.
+    Returns empty string if OPENAI_API_KEY not configured."""
+    client = get_whisper_client()
+    if not client:
+        raise RuntimeError("OPENAI_API_KEY not configured")
+    audio_file = BytesIO(audio_bytes)
+    audio_file.name = filename
+    response = await client.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio_file,
+        language="ru",
+    )
+    return (response.text or "").strip()

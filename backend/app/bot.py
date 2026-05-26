@@ -13,6 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
+    CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -35,24 +36,37 @@ API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
 # Button labels (single source of truth)
 # ---------------------------------------------------------------------------
 
-BTN_OPEN_APP = "📲 Открыть приложение"
+BTN_OPEN_APP = "📲 Открыть Поляну"
 BTN_NEW_EVENT = "➕ Новое событие"
-BTN_IMPORT_URL = "🔗 Рецепт по ссылке"
-BTN_IMPORT_TEXT = "📝 Рецепт текстом"
-BTN_IMPORT_PHOTO_INFO = "📷 Рецепт с фото"
+BTN_IMPORT_RECIPE = "🍳 Добавить рецепт"
 BTN_HELP = "❓ Помощь"
+
+# Inline-submenu callback prefixes
+CB_IMPORT_URL = "import_url"
+CB_IMPORT_TEXT = "import_text"
+CB_IMPORT_VOICE = "import_voice"
+CB_IMPORT_PHOTO = "import_photo"
 
 
 def main_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_OPEN_APP, web_app=WebAppInfo(url=settings.miniapp_url))],
-            [KeyboardButton(text=BTN_NEW_EVENT)],
-            [KeyboardButton(text=BTN_IMPORT_URL), KeyboardButton(text=BTN_IMPORT_TEXT)],
-            [KeyboardButton(text=BTN_IMPORT_PHOTO_INFO), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_NEW_EVENT), KeyboardButton(text=BTN_IMPORT_RECIPE)],
+            [KeyboardButton(text=BTN_HELP)],
         ],
         resize_keyboard=True,
     )
+
+
+def import_inline_kb() -> InlineKeyboardMarkup:
+    """Submenu shown after user taps 'Добавить рецепт'."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔗 По ссылке", callback_data=CB_IMPORT_URL)],
+        [InlineKeyboardButton(text="📝 Текстом", callback_data=CB_IMPORT_TEXT)],
+        [InlineKeyboardButton(text="🎤 Голосом", callback_data=CB_IMPORT_VOICE)],
+        [InlineKeyboardButton(text="📷 Фото / скриншот", callback_data=CB_IMPORT_PHOTO)],
+    ])
 
 
 def open_app_inline() -> InlineKeyboardMarkup:
@@ -109,7 +123,7 @@ async def cmd_start(message: Message, state: FSMContext):
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
             menu_button=MenuButtonWebApp(
-                text="Открыть Mealie",
+                text="Открыть Поляну",
                 web_app=WebAppInfo(url=settings.miniapp_url),
             ),
         )
@@ -143,15 +157,16 @@ async def cmd_start(message: Message, state: FSMContext):
             return
 
     await message.answer(
-        "👋 Привет! Я Mealie Bot — помогаю планировать застолья.\n\n"
+        "🌳 *Поляна* — помогаю планировать застолья.\n\n"
         "Что я умею:\n"
-        "• Создавать события и хранить ваши рецепты\n"
-        "• Импортировать рецепты по ссылке, тексту или с фото\n"
-        "• Собирать единый список закупки по событию\n"
-        "• Делать таймлайн готовки\n"
+        "• Создавать события для застолий с друзьями\n"
+        "• Импортировать рецепты — по ссылке, тексту, голосом или с фото\n"
+        "• Собирать единый список закупок по событию\n"
         "• Напоминать о событии за сутки\n"
-        "• Совместное редактирование с друзьями\n\n"
+        "• Совместная редактура меню с друзьями\n"
+        "• Красивое меню для гостей в PDF\n\n"
         "Выбери действие на клавиатуре снизу 👇",
+        parse_mode="Markdown",
         reply_markup=main_kb(),
     )
 
@@ -245,6 +260,24 @@ async def new_event_guests(message: Message, state: FSMContext):
         )
     else:
         await message.answer("❌ Не удалось создать мероприятие.", reply_markup=main_kb())
+
+
+# --- Import recipe (menu hub) ---
+
+async def show_import_menu(message: Message):
+    """Show the inline submenu with 4 import options + reliability hint."""
+    await message.answer(
+        "🍳 *Как добавить рецепт?*\n\n"
+        "Я понимаю 4 способа — выбери удобный:\n"
+        "🔗 *По ссылке* — лучше всего работает с povarenok.ru, 1000.menu, gastronom.ru. "
+        "Сложные сайты (Pinterest, Instagram, рекламные блоги) могут не распознаваться — тогда используй фото или текст.\n"
+        "📝 *Текстом* — вставь рецепт в любом формате одним сообщением\n"
+        "🎤 *Голосом* — надиктуй рецепт голосовым сообщением\n"
+        "📷 *Фото* — пришли скриншот или фото страницы (можно несколько фото альбомом)\n\n"
+        "_⚠ Если что-то распозналось неправильно — поправь руками в Mini App. Каждый ингредиент можно добавить, изменить или удалить._",
+        parse_mode="Markdown",
+        reply_markup=import_inline_kb(),
+    )
 
 
 # --- Import URL ---
@@ -458,6 +491,123 @@ async def photo_hint(message: Message):
     )
 
 
+# --- Callback handlers for inline import submenu ---
+
+async def cb_import_url(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+    if query.message:
+        await query.message.answer(
+            "🔗 Пришли мне ссылку на рецепт.\n"
+            "Лучше всего работает с povarenok.ru, 1000.menu, gastronom.ru.\n\n"
+            "Для отмены: /cancel"
+        )
+    await state.set_state(ImportUrl.waiting_for_url)
+
+
+async def cb_import_text(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+    if query.message:
+        await query.message.answer(
+            "📝 Пришли мне текст рецепта одним сообщением.\n\n"
+            "Можно вставить список ингредиентов + способ готовки в любом формате — "
+            "я распознаю через LLM.\n\n"
+            "_Если получилось криво — поправь руками в Mini App._\n\n"
+            "Для отмены: /cancel",
+            parse_mode="Markdown",
+        )
+    await state.set_state(ImportText.waiting_for_text)
+
+
+async def cb_import_voice(query: CallbackQuery):
+    await query.answer()
+    if query.message:
+        await query.message.answer(
+            "🎤 Просто *запиши голосовое сообщение* с рецептом — "
+            "я расшифрую через Whisper и распознаю.\n\n"
+            "Совет: говори чётко, перечисляй ингредиенты и количество "
+            "(например: «двести грамм муки, три яйца, столовая ложка сахара…»).",
+            parse_mode="Markdown",
+        )
+
+
+async def cb_import_photo(query: CallbackQuery):
+    await query.answer()
+    if query.message:
+        await query.message.answer(
+            "📷 Просто *пришли мне фото* рецепта одним сообщением (или альбомом).\n\n"
+            "Подойдёт страница книги, скриншот Pinterest/Instagram, рукописный рецепт и т.п.",
+            parse_mode="Markdown",
+        )
+
+
+# --- Voice recognition handler (Whisper) ---
+
+async def handle_voice(message: Message, bot: Bot):
+    """Auto-transcribe voice/audio via Whisper, then parse the transcript as recipe."""
+    file_obj = message.voice or message.audio
+    if not file_obj:
+        return
+
+    wait = await message.answer("🎤 Слушаю и расшифровываю через Whisper, подожди 10-20 сек...")
+
+    file = await bot.get_file(file_obj.file_id)
+    buf = BytesIO()
+    await bot.download(file, destination=buf)
+
+    # Transcribe
+    try:
+        from app.services.llm import transcribe_audio
+        transcript = await transcribe_audio(buf.getvalue(), filename="voice.ogg")
+    except RuntimeError as e:
+        try: await wait.delete()
+        except Exception: pass
+        await message.answer(
+            "❌ Голосовой ввод не настроен (нет `OPENAI_API_KEY`). Попроси администратора.",
+            parse_mode="Markdown",
+            reply_markup=main_kb(),
+        )
+        log.warning("transcribe failed: %s", e)
+        return
+    except Exception as e:
+        try: await wait.delete()
+        except Exception: pass
+        await message.answer(f"❌ Не получилось расшифровать: {e}", reply_markup=main_kb())
+        return
+
+    if not transcript:
+        try: await wait.delete()
+        except Exception: pass
+        await message.answer("❌ Не удалось распознать речь. Попробуй ещё раз.", reply_markup=main_kb())
+        return
+
+    # Parse transcript as recipe text
+    result = await api_post("/recipes/import-text", {
+        "text": transcript,
+        "title": None,
+        "telegram_user_id": message.from_user.id if message.from_user else None,
+    })
+    try: await wait.delete()
+    except Exception: pass
+
+    if result:
+        ing_count = len(result.get("ingredients", []))
+        await message.answer(
+            f"✅ Рецепт распознан с голоса!\n\n"
+            f"*{result['title']}*\n"
+            f"🍽 Порций: {result.get('base_servings', '?')}\n"
+            f"🥕 Ингредиентов: {ing_count}\n\n"
+            f"_Если что-то криво — поправь в Mini App._",
+            parse_mode="Markdown",
+            reply_markup=main_kb(),
+        )
+    else:
+        await message.answer(
+            f"⚠️ Расшифровал голос: «{transcript[:200]}»\n\n"
+            f"Но не смог распознать как рецепт. Попробуй надиктовать чётче с ингредиентами и количеством.",
+            reply_markup=main_kb(),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -467,7 +617,7 @@ async def _configure_bot_menu(bot: Bot):
     Overrides whatever was set via BotFather — guarantees correctness."""
     try:
         await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
-            text="Открыть Mealie",
+            text="Открыть Поляну",
             web_app=WebAppInfo(url=settings.miniapp_url),
         ))
         log.info("Menu button set to WebApp URL: %s", settings.miniapp_url)
@@ -487,10 +637,14 @@ async def main():
 
     # Button-text matching (must come BEFORE FSM handlers so buttons always work)
     dp.message.register(start_new_event, F.text == BTN_NEW_EVENT)
-    dp.message.register(start_import_url, F.text == BTN_IMPORT_URL)
-    dp.message.register(start_import_text, F.text == BTN_IMPORT_TEXT)
-    dp.message.register(photo_hint, F.text == BTN_IMPORT_PHOTO_INFO)
+    dp.message.register(show_import_menu, F.text == BTN_IMPORT_RECIPE)
     dp.message.register(show_help, F.text == BTN_HELP)
+
+    # Inline callback handlers (submenu of "Добавить рецепт")
+    dp.callback_query.register(cb_import_url, F.data == CB_IMPORT_URL)
+    dp.callback_query.register(cb_import_text, F.data == CB_IMPORT_TEXT)
+    dp.callback_query.register(cb_import_voice, F.data == CB_IMPORT_VOICE)
+    dp.callback_query.register(cb_import_photo, F.data == CB_IMPORT_PHOTO)
 
     # FSM: new_event
     dp.message.register(new_event_title, NewEvent.title)
@@ -502,8 +656,9 @@ async def main():
     dp.message.register(import_url_receive, ImportUrl.waiting_for_url)
     dp.message.register(import_text_receive, ImportText.waiting_for_text)
 
-    # Photos — auto-parse
+    # Photos & voice — auto-parse (no command needed)
     dp.message.register(handle_photo, F.photo)
+    dp.message.register(handle_voice, F.voice | F.audio)
 
     log.info("Bot started (polling)...")
     await dp.start_polling(bot, skip_updates=True)
