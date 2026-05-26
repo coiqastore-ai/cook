@@ -29,9 +29,11 @@ const pdfUrl = computed(() => `${API_BASE.replace(/\/$/, "")}/events/${props.id}
 // Share a rich preview card (og: tags) — Telegram renders it as a beautiful card.
 // Clicking the card in chat opens browser → instant redirect to bot deep-link → auto-join event.
 function shareWithFriend() {
-  const shareUrl = `${API_BASE.replace(/\/$/, "")}/events/${props.id}/share`;
-  const title = encodeURIComponent(event.value?.title ?? "событию");
-  const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=Присоединяйся%20к%20${title}%20в%20Поляне`;
+  // API_BASE may be relative ("/api") in production — build absolute URL so Telegram can resolve it
+  const apiBase = API_BASE.replace(/\/$/, "");
+  const absoluteApi = apiBase.startsWith("http") ? apiBase : `${window.location.origin}${apiBase}`;
+  const shareUrl = `${absoluteApi}/events/${props.id}/share`;
+  const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}`;
   const tg = (window as any).Telegram?.WebApp;
   if (tg && typeof tg.openTelegramLink === "function") {
     tg.openTelegramLink(tgShareUrl);
