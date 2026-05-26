@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth import get_current_user_id, get_current_user_id_optional
 from app.db import get_session
 from app.models import Event, EventCollaborator, EventRecipe, Recipe
 from app.schemas.event import (
@@ -39,44 +40,79 @@ async def _get_event_or_404(event_id: int, session: AsyncSession) -> Event:
     return event
 
 
+async def _can_access_event(event: Event, user_id: int) -> bool:
+    """User can access an event if they own it or are a collaborator."""
+    if event.telegram_user_id == user_id:
+        return True
+    return any(c.telegram_user_id == user_id for c in (event.collaborators or []))
+
+
 @router.get("/", response_model=list[EventOut])
 async def list_events(
-    telegram_user_id: int | None = None,
+    user_id: int = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    """List events. If telegram_user_id is provided, only return events the user owns
-    or is collaborator on. Otherwise return all (admin view)."""
+    """List events visible to the authenticated user (owned + collaborator-on)."""
     from sqlalchemy import or_
 
-    query = select(Event).options(*_EVENT_LOAD).order_by(Event.date.asc().nulls_last())
-    if telegram_user_id is not None:
-        # Owned OR collaborator-on
-        collab_event_ids = select(EventCollaborator.event_id).where(
-            EventCollaborator.telegram_user_id == telegram_user_id
-        )
-        query = query.where(
-            or_(Event.telegram_user_id == telegram_user_id, Event.id.in_(collab_event_ids))
-        )
+    collab_event_ids = select(EventCollaborator.event_id).where(
+        EventCollaborator.telegram_user_id == user_id
+    )
+    query = (
+        select(Event)
+        .where(or_(Event.telegram_user_id == user_id, Event.id.in_(collab_event_ids)))
+        .options(*_EVENT_LOAD)
+        .order_by(Event.date.asc().nulls_last())
+    )
     result = await session.execute(query)
     return result.scalars().all()
 
 
 @router.post("/", response_model=EventOut, status_code=201)
-async def create_event(body: EventCreate, session: AsyncSession = Depends(get_session)):
-    event = Event(**body.model_dump())
+async def create_event(
+    body: EventCreate,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    data = body.model_dump()
+    data["telegram_user_id"] = user_id  # owner = authenticated user
+    event = Event(**data)
     session.add(event)
     await session.commit()
     return await _get_event_or_404(event.id, session)
 
 
+async def _require_event_access(event_id: int, user_id: int, session: AsyncSession) -> Event:
+    event = await _get_event_or_404(event_id, session)
+    if not await _can_access_event(event, user_id):
+        raise HTTPException(403, "Forbidden — not your event")
+    return event
+
+
+async def _require_event_owner(event_id: int, user_id: int, session: AsyncSession) -> Event:
+    event = await _get_event_or_404(event_id, session)
+    if event.telegram_user_id != user_id:
+        raise HTTPException(403, "Forbidden — owner-only action")
+    return event
+
+
 @router.get("/{event_id}", response_model=EventOut)
-async def get_event(event_id: int, session: AsyncSession = Depends(get_session)):
-    return await _get_event_or_404(event_id, session)
+async def get_event(
+    event_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    return await _require_event_access(event_id, user_id, session)
 
 
 @router.patch("/{event_id}", response_model=EventOut)
-async def update_event(event_id: int, body: EventUpdate, session: AsyncSession = Depends(get_session)):
-    event = await _get_event_or_404(event_id, session)
+async def update_event(
+    event_id: int,
+    body: EventUpdate,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    event = await _require_event_access(event_id, user_id, session)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(event, field, value)
     await session.commit()
@@ -84,38 +120,45 @@ async def update_event(event_id: int, body: EventUpdate, session: AsyncSession =
 
 
 @router.delete("/{event_id}", status_code=204)
-async def delete_event(event_id: int, session: AsyncSession = Depends(get_session)):
-    event = await _get_event_or_404(event_id, session)
+async def delete_event(
+    event_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    event = await _require_event_owner(event_id, user_id, session)
     await session.delete(event)
     await session.commit()
 
 
 @router.post("/{event_id}/recipes", response_model=EventOut, status_code=201)
 async def add_recipe_to_event(
-    event_id: int, body: AddRecipeToEvent, session: AsyncSession = Depends(get_session)
+    event_id: int,
+    body: AddRecipeToEvent,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
 ):
-    await _get_event_or_404(event_id, session)
-
-    # Check recipe exists
+    await _require_event_access(event_id, user_id, session)
     recipe = await session.get(Recipe, body.recipe_id)
     if not recipe:
         raise HTTPException(404, "Recipe not found")
-
-    # Upsert
     existing = await session.get(EventRecipe, (event_id, body.recipe_id))
     if existing:
         existing.servings_multiplier = body.servings_multiplier
     else:
         session.add(EventRecipe(event_id=event_id, recipe_id=body.recipe_id, servings_multiplier=body.servings_multiplier))
-
     await session.commit()
     return await _get_event_or_404(event_id, session)
 
 
 @router.patch("/{event_id}/recipes/{recipe_id}", response_model=EventOut)
 async def update_recipe_multiplier(
-    event_id: int, recipe_id: int, body: UpdateRecipeMultiplier, session: AsyncSession = Depends(get_session)
+    event_id: int,
+    recipe_id: int,
+    body: UpdateRecipeMultiplier,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
 ):
+    await _require_event_access(event_id, user_id, session)
     er = await session.get(EventRecipe, (event_id, recipe_id))
     if not er:
         raise HTTPException(404, "Recipe not linked to this event")
@@ -126,8 +169,12 @@ async def update_recipe_multiplier(
 
 @router.delete("/{event_id}/recipes/{recipe_id}", response_model=EventOut)
 async def remove_recipe_from_event(
-    event_id: int, recipe_id: int, session: AsyncSession = Depends(get_session)
+    event_id: int,
+    recipe_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
 ):
+    await _require_event_access(event_id, user_id, session)
     er = await session.get(EventRecipe, (event_id, recipe_id))
     if not er:
         raise HTTPException(404, "Recipe not linked to this event")
@@ -137,11 +184,13 @@ async def remove_recipe_from_event(
 
 
 @router.get("/{event_id}/ical")
-async def event_ical(event_id: int, session: AsyncSession = Depends(get_session)):
+async def event_ical(
+    event_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
     """Download event as .ics file — works with Google Calendar, Apple Calendar, Outlook etc."""
-    event = await session.get(Event, event_id)
-    if not event:
-        raise HTTPException(404, "Event not found")
+    event = await _require_event_access(event_id, user_id, session)
     if not event.date:
         raise HTTPException(422, "Event has no date set")
 
@@ -191,12 +240,23 @@ async def event_ical(event_id: int, session: AsyncSession = Depends(get_session)
 
 @router.post("/{event_id}/collaborators", response_model=EventOut, status_code=201)
 async def add_collaborator(
-    event_id: int, body: AddCollaborator, session: AsyncSession = Depends(get_session)
+    event_id: int,
+    body: AddCollaborator,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
 ):
-    await _get_event_or_404(event_id, session)
+    """Two valid cases:
+      1. Authenticated user adds *themselves* (deep-link join from bot)
+      2. Event owner adds someone else
+    """
+    event = await _get_event_or_404(event_id, session)
+    is_owner = event.telegram_user_id == user_id
+    is_self_add = body.telegram_user_id == user_id
+    if not (is_owner or is_self_add):
+        raise HTTPException(403, "Can only add yourself; only owner can add others")
+
     existing = await session.get(EventCollaborator, (event_id, body.telegram_user_id))
     if existing:
-        # Update name/username if changed
         if body.name:
             existing.name = body.name
         if body.username:
@@ -214,8 +274,18 @@ async def add_collaborator(
 
 @router.delete("/{event_id}/collaborators/{telegram_user_id}", response_model=EventOut)
 async def remove_collaborator(
-    event_id: int, telegram_user_id: int, session: AsyncSession = Depends(get_session)
+    event_id: int,
+    telegram_user_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
 ):
+    """Owner can remove any collaborator. Collaborator can remove themselves (leave)."""
+    event = await _get_event_or_404(event_id, session)
+    is_owner = event.telegram_user_id == user_id
+    is_self_remove = telegram_user_id == user_id
+    if not (is_owner or is_self_remove):
+        raise HTTPException(403, "Forbidden")
+
     collab = await session.get(EventCollaborator, (event_id, telegram_user_id))
     if not collab:
         raise HTTPException(404, "Collaborator not found")
@@ -225,11 +295,15 @@ async def remove_collaborator(
 
 
 @router.get("/{event_id}/menu.pdf")
-async def event_menu_pdf(event_id: int, session: AsyncSession = Depends(get_session)):
+async def event_menu_pdf(
+    event_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
     """Generate beautiful PDF menu for sharing with guests (no ingredients/grams)."""
     from app.services.pdf_menu import render_menu_pdf
 
-    event = await _get_event_or_404(event_id, session)
+    event = await _require_event_access(event_id, user_id, session)
     pdf_bytes = render_menu_pdf(event)
     return Response(
         content=pdf_bytes,

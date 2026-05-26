@@ -97,11 +97,26 @@ class ImportUrl(StatesGroup):
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+def _internal_headers(user_id: int | None = None) -> dict[str, str]:
+    """Build headers that auth the bot as an internal trusted service.
+    user_id is appended as query param so dep can pick it up."""
+    h: dict[str, str] = {}
+    if settings.internal_api_key:
+        h["X-Internal-API-Key"] = settings.internal_api_key
+    return h
+
+
 async def api_post(path: str, data: dict, timeout: float = 180) -> dict | None:
-    """Returns parsed JSON on success, None on failure. Logs the response body for diagnostics."""
+    """POST as internal bot service. If `telegram_user_id` is in data, also pass it as query."""
+    headers = _internal_headers()
+    # Some endpoints expect user_id as a query param (auth dep reads it)
+    user_id = data.get("telegram_user_id")
+    if user_id is not None and "?" not in path:
+        path = f"{path}?telegram_user_id={user_id}"
+
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            r = await client.post(f"{API_BASE}{path}", json=data)
+            r = await client.post(f"{API_BASE}{path}", json=data, headers=headers)
             if r.status_code >= 400:
                 log.error("API POST %s → %d: %s", path, r.status_code, r.text[:500])
                 return None

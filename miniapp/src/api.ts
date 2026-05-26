@@ -14,10 +14,20 @@ export async function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function getInitData(): string {
+  const tg = (window as any).Telegram?.WebApp;
+  return tg?.initData ?? "";
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body) headers["Content-Type"] = "application/json";
+  const initData = getInitData();
+  if (initData) headers["X-Telegram-Init-Data"] = initData;
+
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : {},
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`${method} ${path} → ${res.status}`);

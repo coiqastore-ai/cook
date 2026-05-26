@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth import get_current_user_id
 from app.db import get_session
 from app.models import Ingredient, Recipe
 from app.schemas.recipe import ImportRecipeRequest, RecipeOut, IngredientOut
@@ -68,25 +69,35 @@ class RecipeUpdate(BaseModel):
 
 @router.get("/", response_model=list[RecipeOut])
 async def list_recipes(
-    telegram_user_id: int | None = None,
+    user_id: int = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    """Library view. If telegram_user_id is given, return only recipes owned by that user."""
-    query = select(Recipe).options(selectinload(Recipe.ingredients)).order_by(Recipe.created_at.desc())
-    if telegram_user_id is not None:
-        query = query.where(Recipe.telegram_user_id == telegram_user_id)
+    """Library view — recipes owned by the authenticated user only."""
+    query = (
+        select(Recipe)
+        .where(Recipe.telegram_user_id == user_id)
+        .options(selectinload(Recipe.ingredients))
+        .order_by(Recipe.created_at.desc())
+    )
     result = await session.execute(query)
     return result.scalars().all()
 
 
 @router.get("/{recipe_id}", response_model=RecipeOut)
-async def get_recipe(recipe_id: int, session: AsyncSession = Depends(get_session)):
+async def get_recipe(
+    recipe_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(
         select(Recipe).where(Recipe.id == recipe_id).options(selectinload(Recipe.ingredients))
     )
     recipe = result.scalar_one_or_none()
     if not recipe:
         raise HTTPException(404, "Recipe not found")
+    # Authorization: only the owner can see their recipe
+    if recipe.telegram_user_id is not None and recipe.telegram_user_id != user_id:
+        raise HTTPException(403, "Forbidden")
     return recipe
 
 
@@ -132,27 +143,39 @@ async def _save_parsed_recipe(
 
 
 @router.post("/import", response_model=RecipeOut, status_code=201)
-async def import_recipe(body: ImportRecipeRequest, session: AsyncSession = Depends(get_session)):
+async def import_recipe(
+    body: ImportRecipeRequest,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
     try:
         data = await recipe_parser.parse_recipe(body.url)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe: {e}")
-    return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
+    return await _save_parsed_recipe(data, session, telegram_user_id=user_id)
 
 
 @router.post("/import-text", response_model=RecipeOut, status_code=201)
-async def import_recipe_from_text(body: ImportTextRequest, session: AsyncSession = Depends(get_session)):
+async def import_recipe_from_text(
+    body: ImportTextRequest,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
     if not body.text.strip():
         raise HTTPException(422, "Empty text")
     try:
         data = await recipe_parser.parse_recipe_from_text(body.text, title_hint=body.title)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe: {e}")
-    return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
+    return await _save_parsed_recipe(data, session, telegram_user_id=user_id)
 
 
 @router.post("/import-image", response_model=RecipeOut, status_code=201)
-async def import_recipe_from_image(body: ImportImageRequest, session: AsyncSession = Depends(get_session)):
+async def import_recipe_from_image(
+    body: ImportImageRequest,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
     images = body.images_base64 or ([body.image_base64] if body.image_base64 else [])
     images = [img for img in images if img and img.strip()]
     if not images:
@@ -161,25 +184,44 @@ async def import_recipe_from_image(body: ImportImageRequest, session: AsyncSessi
         data = await recipe_parser.parse_recipe_from_images(images, title_hint=body.title)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe from image: {e}")
-    return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
+    return await _save_parsed_recipe(data, session, telegram_user_id=user_id)
 
 
 @router.post("/import-audio", response_model=RecipeOut, status_code=201)
-async def import_recipe_from_audio(body: ImportAudioRequest, session: AsyncSession = Depends(get_session)):
+async def import_recipe_from_audio(
+    body: ImportAudioRequest,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
     if not body.audio_base64.strip():
         raise HTTPException(422, "No audio data provided")
     try:
         data = await recipe_parser.parse_recipe_from_audio(body.audio_base64, audio_format=body.audio_format)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse recipe from audio: {e}")
-    return await _save_parsed_recipe(data, session, telegram_user_id=body.telegram_user_id)
+    return await _save_parsed_recipe(data, session, telegram_user_id=user_id)
 
 
 # ---------- MANUAL CREATE / UPDATE ----------
 
+async def _own_recipe_or_403(recipe_id: int, user_id: int, session: AsyncSession) -> Recipe:
+    recipe = await session.get(Recipe, recipe_id)
+    if not recipe:
+        raise HTTPException(404, "Recipe not found")
+    if recipe.telegram_user_id is not None and recipe.telegram_user_id != user_id:
+        raise HTTPException(403, "Forbidden — not your recipe")
+    return recipe
+
+
 @router.post("/", response_model=RecipeOut, status_code=201)
-async def create_recipe(body: RecipeCreate, session: AsyncSession = Depends(get_session)):
-    recipe = Recipe(**body.model_dump())
+async def create_recipe(
+    body: RecipeCreate,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    data = body.model_dump()
+    data["telegram_user_id"] = user_id  # always tie to authenticated user
+    recipe = Recipe(**data)
     session.add(recipe)
     await session.commit()
     result = await session.execute(
@@ -189,10 +231,13 @@ async def create_recipe(body: RecipeCreate, session: AsyncSession = Depends(get_
 
 
 @router.patch("/{recipe_id}", response_model=RecipeOut)
-async def update_recipe(recipe_id: int, body: RecipeUpdate, session: AsyncSession = Depends(get_session)):
-    recipe = await session.get(Recipe, recipe_id)
-    if not recipe:
-        raise HTTPException(404, "Recipe not found")
+async def update_recipe(
+    recipe_id: int,
+    body: RecipeUpdate,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    recipe = await _own_recipe_or_403(recipe_id, user_id, session)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(recipe, field, value)
     await session.commit()
@@ -203,10 +248,12 @@ async def update_recipe(recipe_id: int, body: RecipeUpdate, session: AsyncSessio
 
 
 @router.delete("/{recipe_id}", status_code=204)
-async def delete_recipe(recipe_id: int, session: AsyncSession = Depends(get_session)):
-    recipe = await session.get(Recipe, recipe_id)
-    if not recipe:
-        raise HTTPException(404, "Recipe not found")
+async def delete_recipe(
+    recipe_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    recipe = await _own_recipe_or_403(recipe_id, user_id, session)
     await session.delete(recipe)
     await session.commit()
 
@@ -214,10 +261,13 @@ async def delete_recipe(recipe_id: int, session: AsyncSession = Depends(get_sess
 # ---------- INGREDIENTS (manual edit) ----------
 
 @router.post("/{recipe_id}/ingredients", response_model=IngredientOut, status_code=201)
-async def add_ingredient(recipe_id: int, body: IngredientCreate, session: AsyncSession = Depends(get_session)):
-    recipe = await session.get(Recipe, recipe_id)
-    if not recipe:
-        raise HTTPException(404, "Recipe not found")
+async def add_ingredient(
+    recipe_id: int,
+    body: IngredientCreate,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    await _own_recipe_or_403(recipe_id, user_id, session)
     norm_g = await normalizer.normalize_ingredient(body.name, body.quantity, body.unit)
     ing = Ingredient(
         recipe_id=recipe_id, name=body.name, quantity=body.quantity, unit=body.unit, normalized_grams=norm_g,
@@ -229,13 +279,19 @@ async def add_ingredient(recipe_id: int, body: IngredientCreate, session: AsyncS
 
 
 @router.patch("/{recipe_id}/ingredients/{ingredient_id}", response_model=IngredientOut)
-async def update_ingredient(recipe_id: int, ingredient_id: int, body: IngredientUpdate, session: AsyncSession = Depends(get_session)):
+async def update_ingredient(
+    recipe_id: int,
+    ingredient_id: int,
+    body: IngredientUpdate,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    await _own_recipe_or_403(recipe_id, user_id, session)
     ing = await session.get(Ingredient, ingredient_id)
     if not ing or ing.recipe_id != recipe_id:
         raise HTTPException(404, "Ingredient not found")
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(ing, field, value)
-    # Re-normalize if name/quantity/unit changed
     ing.normalized_grams = await normalizer.normalize_ingredient(ing.name, ing.quantity, ing.unit)
     await session.commit()
     await session.refresh(ing)
@@ -243,7 +299,13 @@ async def update_ingredient(recipe_id: int, ingredient_id: int, body: Ingredient
 
 
 @router.delete("/{recipe_id}/ingredients/{ingredient_id}", status_code=204)
-async def delete_ingredient(recipe_id: int, ingredient_id: int, session: AsyncSession = Depends(get_session)):
+async def delete_ingredient(
+    recipe_id: int,
+    ingredient_id: int,
+    user_id: int = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    await _own_recipe_or_403(recipe_id, user_id, session)
     ing = await session.get(Ingredient, ingredient_id)
     if not ing or ing.recipe_id != recipe_id:
         raise HTTPException(404, "Ingredient not found")

@@ -16,5 +16,8 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/calendar/oauth/callback"
 
+    # Shared secret between bot and backend for internal API calls (bypasses initData check)
+    internal_api_key: str = ""
+
 
 settings = Settings()
