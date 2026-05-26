@@ -26,17 +26,17 @@ const importing = ref(false);
 
 const pdfUrl = computed(() => `${API_BASE.replace(/\/$/, "")}/events/${props.id}/menu.pdf`);
 
-const BOT_USERNAME = "reciptesbot";  // ⚠ change if bot username changes
-
+// Share a rich preview card (og: tags) — Telegram renders it as a beautiful card.
+// Clicking the card in chat opens browser → instant redirect to bot deep-link → auto-join event.
 function shareWithFriend() {
-  const deepLink = `https://t.me/${BOT_USERNAME}?start=event_${props.id}`;
+  const shareUrl = `${API_BASE.replace(/\/$/, "")}/events/${props.id}/share`;
   const title = encodeURIComponent(event.value?.title ?? "событию");
-  const url = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=Присоединяйся%20к%20${title}%20в%20Поляне`;
+  const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=Присоединяйся%20к%20${title}%20в%20Поляне`;
   const tg = (window as any).Telegram?.WebApp;
   if (tg && typeof tg.openTelegramLink === "function") {
-    tg.openTelegramLink(url);
+    tg.openTelegramLink(tgShareUrl);
   } else {
-    window.open(url, "_blank");
+    window.open(tgShareUrl, "_blank");
   }
 }
 
@@ -160,7 +160,7 @@ onMounted(load);
       </a>
       <button @click="shareWithFriend"
         class="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl py-3 text-sm font-medium">
-        👥 Пригласить друга
+        📤 Поделиться
       </button>
     </div>
 

@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from html import escape
+
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -233,4 +235,91 @@ async def event_menu_pdf(event_id: int, session: AsyncSession = Depends(get_sess
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="menu-{event.id}.pdf"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Share-card endpoints — for rich Telegram link previews
+# ---------------------------------------------------------------------------
+
+BOT_USERNAME = "reciptesbot"
+PUBLIC_HOST = "https://cook.coiqa.ru"
+
+
+@router.get("/{event_id}/share", response_class=HTMLResponse)
+async def share_event_html(event_id: int, session: AsyncSession = Depends(get_session)):
+    """Public HTML page with OpenGraph tags. Telegram crawler fetches this and renders preview card.
+    Visiting in a browser → auto-redirect to bot deep-link to join the event."""
+    event = await _get_event_or_404(event_id, session)
+    deep_link = f"https://t.me/{BOT_USERNAME}?start=event_{event_id}"
+    cover_url = f"{PUBLIC_HOST}/api/events/{event_id}/share/cover.png"
+    share_url = f"{PUBLIC_HOST}/api/events/{event_id}/share"
+
+    parts: list[str] = []
+    if event.date:
+        parts.append(event.date.strftime("%d.%m.%Y"))
+    parts.append(f"{event.guests_count} гостей")
+    n = len(event.event_recipes)
+    parts.append(f"{n} {'блюдо' if n == 1 else ('блюда' if n < 5 else 'блюд')}")
+    desc = " · ".join(parts)
+
+    title_esc = escape(event.title)
+    desc_esc = escape(desc)
+
+    html = f"""<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title_esc} — Поляна</title>
+
+<meta property="og:title" content="{title_esc}">
+<meta property="og:description" content="{desc_esc}">
+<meta property="og:image" content="{cover_url}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="{share_url}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Поляна">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{title_esc}">
+<meta name="twitter:description" content="{desc_esc}">
+<meta name="twitter:image" content="{cover_url}">
+
+<meta http-equiv="refresh" content="0; url={deep_link}">
+<style>
+body{{font-family:system-ui,sans-serif;background:#fafaf7;color:#2c2c2c;text-align:center;padding:40px 20px;margin:0}}
+h1{{font-weight:300;font-size:32px;margin:20px 0}}
+.btn{{display:inline-block;background:#22c55e;color:#fff;padding:14px 28px;border-radius:12px;text-decoration:none;font-weight:500;margin-top:20px}}
+</style>
+</head>
+<body>
+<p style="color:#b8956c;letter-spacing:6px;font-size:13px">МЕНЮ В ПОЛЯНЕ</p>
+<h1>{title_esc}</h1>
+<p style="color:#6c6c6c">{desc_esc}</p>
+<p><a href="{deep_link}" class="btn">📲 Открыть в Telegram</a></p>
+<script>
+// Programmatic redirect (faster than meta-refresh on most browsers)
+setTimeout(function() {{ window.location.href = "{deep_link}"; }}, 100);
+</script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@router.get("/{event_id}/share/cover.png")
+async def share_event_cover(event_id: int, session: AsyncSession = Depends(get_session)):
+    """Generated PNG used as og:image in Telegram link preview."""
+    from app.services.share_card import render_cover_png
+
+    event = await _get_event_or_404(event_id, session)
+    png = render_cover_png(event)
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            # Telegram caches og:image — let it cache for a while
+            "Cache-Control": "public, max-age=3600",
+        },
     )
