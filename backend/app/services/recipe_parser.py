@@ -82,7 +82,8 @@ async def parse_recipe(url: str) -> dict:
   "ingredients": [{{"name": "string", "quantity": number or null, "unit": "string or null"}}]
 }}
 
-IMPORTANT: Always return all text in RUSSIAN. Translate the title, ingredient names, units, and instructions to Russian if the source is in another language. Keep numeric values and quantities unchanged.
+IMPORTANT: Always return all text in RUSSIAN. Translate the title, ingredient names, units, and instructions to Russian if the source is in another language.
+CONVERT imperial units to metric: pounds/lb → kg (1 lb = 0.453 kg, round to 0.05 kg), ounces/oz → g (1 oz = 28 g, round to 5 g), fl oz → ml, cups (US) → ml (1 cup = 240 ml), pints/quarts/gallons → ml/l. Inches → cm where applicable. Fahrenheit → Celsius in cooking temperatures.
 
 HTML:
 {html_trimmed}"""
@@ -140,8 +141,9 @@ Return JSON with exactly these fields:
 
 IMPORTANT:
 - Read EVERY ingredient from EVERY image. Do not skip — even small items like salt, pepper, garlic, oil, water, ice, herbs.
-- Always return all text in RUSSIAN. Translate from any language to Russian. Keep numbers/quantities unchanged.
-- For "to taste" amounts (по вкусу) — quantity: null, unit: "по вкусу".
+- Always return all text in RUSSIAN. Translate from any language to Russian.
+- CONVERT all imperial/US units to metric: lb/pounds → kg, oz/ounces → g, fl oz → ml, cup (US) → ml (1 cup = 240 ml), pint → ml, gallon → l, °F → °C, inches → cm.
+- For "to taste" amounts — quantity: null, unit: "по вкусу".
 - If you can't read something, omit it rather than guess."""
 
     data = await llm.vision_multi_json(prompt, images_b64)
@@ -198,7 +200,8 @@ async def parse_recipe_from_text(text: str, title_hint: str | None = None) -> di
 }}
 
 IMPORTANT:
-- Always return all text in RUSSIAN. Translate from any language to Russian. Keep numbers/quantities unchanged.
+- Always return all text in RUSSIAN. Translate from any language to Russian.
+- CONVERT all imperial/US units to metric: lb/pounds → kg, oz/ounces → g, fl oz → ml, cup (US) → ml (240 ml), pint → ml, gallon → l, °F → °C, inches → cm.
 - Read EVERY ingredient — including salt, pepper, oil, water, etc. Don't skip "small" items.
 - Section headers in the text (e.g. "Мясо", "Овощи", "Приправы") are categories — extract the ingredients that follow, ignore the headers themselves.
 - For "to taste" → quantity: null, unit: "по вкусу".
