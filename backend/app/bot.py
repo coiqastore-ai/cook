@@ -148,15 +148,6 @@ async def cmd_start(message: Message, state: FSMContext):
 
     # Deep-link: /start event_<id> → join as collaborator
     args = message.text.split(maxsplit=1) if message.text else []
-
-    # Analytics: user_start with attribution payload (seed_x / event_<id> / organic)
-    if message.from_user:
-        src = args[1] if len(args) > 1 else "organic"
-        await api_post(
-            "/analytics/track",
-            {"telegram_user_id": message.from_user.id, "event_type": "user_start", "src_payload": src},
-        )
-
     if len(args) > 1 and args[1].startswith("event_"):
         try:
             event_id = int(args[1].removeprefix("event_"))
