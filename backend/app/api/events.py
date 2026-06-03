@@ -5,13 +5,14 @@ from html import escape
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user_id, get_current_user_id_optional
 from app.db import get_session
 from app.models import Event, EventCollaborator, EventRecipe, Recipe
+from app.services.analytics import track
 from app.schemas.event import (
     AddCollaborator,
     AddRecipeToEvent,
@@ -74,11 +75,32 @@ async def create_event(
     user_id: int = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session),
 ):
+    # K-factor detection (read state BEFORE creating this event):
+    #  - prior_owned == 0  → this is the user's first owned event
+    #  - has_joined        → user already joined someone else's event as a guest
+    # both true  → a guest converted into an organizer (the viral loop closed)
+    prior_owned = await session.scalar(
+        select(func.count()).select_from(Event).where(Event.telegram_user_id == user_id)
+    )
+    has_joined = await session.scalar(
+        select(func.count())
+        .select_from(EventCollaborator)
+        .where(EventCollaborator.telegram_user_id == user_id)
+    )
+
     data = body.model_dump()
     data["telegram_user_id"] = user_id  # owner = authenticated user
     event = Event(**data)
     session.add(event)
     await session.commit()
+
+    await track(user_id, "event_created", props={"event_id": event.id}, event_ref=event.id)
+    if (prior_owned or 0) == 0 and (has_joined or 0) > 0:
+        await track(
+            user_id, "guest_became_organizer",
+            props={"event_id": event.id}, event_ref=event.id,
+        )
+
     return await _get_event_or_404(event.id, session)
 
 
@@ -256,6 +278,7 @@ async def add_collaborator(
         raise HTTPException(403, "Can only add yourself; only owner can add others")
 
     existing = await session.get(EventCollaborator, (event_id, body.telegram_user_id))
+    was_new = existing is None
     if existing:
         if body.name:
             existing.name = body.name
@@ -269,6 +292,15 @@ async def add_collaborator(
             username=body.username,
         ))
     await session.commit()
+
+    # Viral loop: a guest joined someone else's event via deep-link (first time only)
+    if was_new and is_self_add and not is_owner:
+        await track(
+            user_id, "guest_joined",
+            props={"event_id": event_id, "owner_id": event.telegram_user_id},
+            event_ref=event_id,
+        )
+
     return await _get_event_or_404(event_id, session)
 
 
